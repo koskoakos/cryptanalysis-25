@@ -35,4 +35,3 @@ print(f"{d_B=}")
 loss_D = float(np.sum(P_C * (1.0 - P_post.max(axis=0))))
 print(f"{loss_D=}")
 
-
