@@ -50,3 +50,10 @@ for c in range(20):
 
     delta_S[c, :] = 0.0
     delta_S[c, winners] = 1.0 / cnt
+
+print(delta_S)
+
+expected_correct = (delta_S * P_post.T).sum(axis=1)
+loss_S = float((P_C * (1.0 - expected_correct)).sum())
+
+print(loss_S)
