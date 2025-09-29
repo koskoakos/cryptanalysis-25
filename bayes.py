@@ -35,3 +35,18 @@ print(f"{d_B=}")
 loss_D = float(np.sum(P_C * (1.0 - P_post.max(axis=0))))
 print(f"{loss_D=}")
 
+d_S = P_post.T.copy()
+
+delta_S = np.zeros_like(d_S)
+for c in range(20):
+    if P_C[c] <= 0:
+        continue
+    row = d_S[c]
+    c_max = row.max()
+    winners = np.isclose(row, c_max)
+    cnt = int(winners.sum())
+    if cnt == 0:
+        continue
+
+    delta_S[c, :] = 0.0
+    delta_S[c, winners] = 1.0 / cnt
