@@ -260,10 +260,7 @@ def run_eval(distorted_texts, random_texts):
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
 
-# %%
-smol_distorted_texts={10: distorted_texts[10], 100: distorted_texts[100]}
-smol_random_texts={10: random_texts[10], 100: random_texts[100]}
-run_eval(smol_distorted_texts, smol_random_texts)
+
 
 run_eval(distorted_texts, random_texts)
 
