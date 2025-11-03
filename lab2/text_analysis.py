@@ -476,32 +476,58 @@ for L in sorted(random_texts.keys()):
 
 
 # %%
-ORDER = ['1.0', '1.1', '1.2', '1.3', '3.0', '5.1']
 
-for L in sorted(random_texts.keys()):
-    if L not in hs:
-        continue
-    h = hs[L]
-    for method, texts in random_texts[L].items():
-        print(f"Random texts | L={L} | Method={method}")
-        results = {name: {1: 0, 2: 0} for name in ORDER}
-        for l in (1, 2):
-            freq_ref = uni_freq if l == 1 else bi_freq
-            forbidden = get_forbidden_set(freq_ref, h)
-            freq_cache = [compute_forbidden_frequencies(text, l, forbidden) for text in texts]
+ORDER=['1.0','1.1','1.2','1.3','3.0','5.1']
 
-            results['1.0'][l] = sum(int(not bool(criterion_1_0(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden))) for text in texts)
-            results['1.1'][l] = sum(int(not bool(criterion_1_1(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
-            results['1.2'][l] = sum(int(not bool(criterion_1_2(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
-            results['1.3'][l] = sum(int(not bool(criterion_1_3(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
-            results['3.0'][l] = sum(int(not bool(criterion_3_0(text, l=l, freq_ref=freq_ref, k_h=0.1))) for text in texts)
-            results['5.1'][l] = sum(int(not bool(criterion_5_1(text, l=l, freq_ref=freq_ref, j=50, k_empt=5))) for text in texts)
+def evaluate_boolean_predictions(y_true,y_pred):
+    TP=sum(t and p for t,p in zip(y_true,y_pred))
+    TN=sum((not t) and (not p) for t,p in zip(y_true,y_pred))
+    FP=sum((not t) and p for t,p in zip(y_true,y_pred))
+    FN=sum(t and (not p) for t,p in zip(y_true,y_pred))
+    n_H0=sum(not t for t in y_true)
+    n_H1=sum(t for t in y_true)
+    alpha=FP/n_H0 if n_H0 else 0.0
+    beta=FN/n_H1 if n_H1 else 0.0
+    return dict(alpha=alpha,beta=beta)
 
-        for name in ORDER:
-            fn1 = results[name][1]
-            fn2 = results[name][2]
-            print(f"  Criterion {name}: FN(l=1)={fn1}, FN(l=2)={fn2}")
-        print()
+def run_eval(distorted_texts, random_texts):
+    for L in sorted(distorted_texts.keys()):
+        # build freq_ref from corpus for this l
+        for l in (1,2):
+            freq_ref = freq_ref_from_corpus(corpus_clean, l)
+            # Distorted: paired H0 vs H1
+            for name, pairs in distorted_texts[L].items():
+                y_true=[]; preds={c:[] for c in ORDER}
+                for (x,y) in pairs:
+                    y_true.extend([False, True])
+                    preds['1.0'].append(crit_1_0(x,l,freq_ref)); preds['1.0'].append(crit_1_0(y,l,freq_ref))
+                    preds['1.1'].append(crit_1_1(x,l,freq_ref)); preds['1.1'].append(crit_1_1(y,l,freq_ref))
+                    preds['1.2'].append(crit_1_2(x,l,freq_ref)); preds['1.2'].append(crit_1_2(y,l,freq_ref))
+                    preds['1.3'].append(crit_1_3(x,l,freq_ref)); preds['1.3'].append(crit_1_3(y,l,freq_ref))
+                    preds['3.0'].append(crit_3_0(x,l,freq_ref)); preds['3.0'].append(crit_3_0(y,l,freq_ref))
+                    preds['5.1'].append(crit_5_1(x,l,freq_ref)); preds['5.1'].append(crit_5_1(y,l,freq_ref))
+                print(f"Distorted | L={L} | l={l} | {name}")
+                for c in ORDER:
+                    m=evaluate_boolean_predictions(y_true, preds[c])
+                    print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
+        # Random: H0 originals vs H1 random samples
+        for l in (1,2):
+            freq_ref = freq_ref_from_corpus(corpus_clean, l)
+            for name, samples in random_texts[L].items():
+                originals=[corpus_slice(corpus_clean, L) for _ in range(len(samples))]
+                y_true=[]; preds={c:[] for c in ORDER}
+                for x,y in zip(originals, samples):
+                    y_true.extend([False, True])
+                    preds['1.0'].append(crit_1_0(x,l,freq_ref)); preds['1.0'].append(crit_1_0(y,l,freq_ref))
+                    preds['1.1'].append(crit_1_1(x,l,freq_ref)); preds['1.1'].append(crit_1_1(y,l,freq_ref))
+                    preds['1.2'].append(crit_1_2(x,l,freq_ref)); preds['1.2'].append(crit_1_2(y,l,freq_ref))
+                    preds['1.3'].append(crit_1_3(x,l,freq_ref)); preds['1.3'].append(crit_1_3(y,l,freq_ref))
+                    preds['3.0'].append(crit_3_0(x,l,freq_ref)); preds['3.0'].append(crit_3_0(y,l,freq_ref))
+                    preds['5.1'].append(crit_5_1(x,l,freq_ref)); preds['5.1'].append(crit_5_1(y,l,freq_ref))
+                print(f"Random | L={L} | l={l} | {name}")
+                for c in ORDER:
+                    m=evaluate_boolean_predictions(y_true, preds[c])
+                    print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
 
 
