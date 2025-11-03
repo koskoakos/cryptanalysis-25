@@ -71,65 +71,47 @@ uni_freq = {''.join(ng): cnt/len(corpus_clean) for ng, cnt in unigrams.items()}
 bi_freq = {''.join(ng): cnt/(len(corpus_clean)-1) for ng, cnt in bigrams.items()}
 
 # %%
-def affine_cipher(text: str, alphabet: list[str], l: int = 1, k: tuple[int, int] = None):
+ef affine_cipher(text, alphabet, l=1, k=None):
     m = len(alphabet)
-    modulus = m if l == 1 else m * m
-
+    M = m if l==1 else m*m
     if k is None:
         while True:
-            a = random.randint(2, modulus - 1)
-            if math.gcd(a, modulus) == 1:
+            a = random.randint(2, M-1)
+            if math.gcd(a, M) == 1:
                 break
-        b = random.randint(0, modulus - 1)
+        b = random.randint(0, M-1)
     else:
-        a, b = k
+        a,b = k
+    idx = {ch:i for i,ch in enumerate(alphabet)}
+    if l==1:
+        return ''.join(alphabet[(a*idx[ch]+b)%M] for ch in text)
+    t=text
+    if len(t)%2: t+=alphabet[0]
+    out=[]
+    for i in range(0,len(t),2):
+        X=idx[t[i]]*m+idx[t[i+1]]
+        Y=(a*X+b)%M
+        out.append(alphabet[Y//m]); out.append(alphabet[Y%m])
+    return ''.join(out)
 
-    idx = {ch: i for i, ch in enumerate(alphabet)}
-    working_text = text
-    if l == 2 and len(working_text) % 2:
-        working_text += alphabet[0]
+def vigenere_cipher(text,key,alphabet):
+    idx={ch:i for i,ch in enumerate(alphabet)}
+    m=len(alphabet)
+    out=[]
+    j=0
+    for ch in text:
+        k=idx[key[j%len(key)]]
+        out.append(alphabet[(idx[ch]+k)%m])
+        j+=1
+    return ''.join(out)
 
-    out = []
-    if l == 1:
-        for ch in working_text:
-            x = idx[ch]
-            y = (a * x + b) % modulus
-            out.append(alphabet[y])
-    else:
-        for i in range(0, len(working_text), 2):
-            x1 = idx[working_text[i]]
-            x2 = idx[working_text[i + 1]]
-            X = x1 * m + x2
-            Y = (a * X + b) % modulus
-            y1, y2 = divmod(Y, m)
-            out.append(alphabet[y1])
-            out.append(alphabet[y2])
-
-    return "".join(out)
-
-def vigenere_cipher(text: str, key: str, alphabet: list[str]) -> str:
-    m = len(alphabet)
-    idx = {ch: i for i, ch in enumerate(alphabet)}
-
-    key_shifts = [idx[ch] for ch in key if ch in idx]
-
-    out = []
-    for i, ch in enumerate(text):
-        if ch in idx:
-            k = key_shifts[i % len(key_shifts)]
-            y = (idx[ch] + k) % m
-            out.append(alphabet[y])
-        else:
-            out.append(ch)
-    return "".join(out)
-
-def ring_abc(alphabet, n=10):
-    s0, s1 = random.choices(alphabet, k=2)
-    idx = {ch: i for i, ch in enumerate(alphabet)}
-    S = [s0, s1]
-    for i in range(2, n):
-        yi = (idx[S[i-1]] + idx[S[i-2]]) % len(alphabet)
-        S.append(alphabet[yi])     
+def ring_abc(alphabet,n=10):
+    s0,s1=random.choice(alphabet),random.choice(alphabet)
+    idx={ch:i for i,ch in enumerate(alphabet)}
+    S=[s0,s1]
+    for i in range(2,n):
+        yi=(idx[S[i-1]]+idx[S[i-2]])%len(alphabet)
+        S.append(alphabet[yi])
     return ''.join(S)
 
 ring_abc(BIGRAM_ALPHABET)
