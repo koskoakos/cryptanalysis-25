@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+import itertools
+import nltk
+from nltk.util import ngrams
+from collections import Counter
 
 random.seed(42)
 np.random.seed(42)
@@ -14,9 +18,6 @@ RESULTS_DIR = Path("results"); RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 (TABLES := RESULTS_DIR / "tables").mkdir(exist_ok=True, parents=True)
 (FIGS := RESULTS_DIR / "figs").mkdir(exist_ok=True, parents=True)
 
-
-# %%
-import itertools
 UA_ALPHABET = list("абвгдеєжзиіїйклмнопрстуфхцчшщьюя")
 
 def normalize(text: str) -> str:
@@ -30,7 +31,6 @@ IDX_ALPHABET = {ch: i for i, ch in enumerate(UA_ALPHABET)}
 BIGRAM_ALPHABET = [f'{a}{b}' for a, b in itertools.product(UA_ALPHABET, UA_ALPHABET)]
 IDX_BIGRAM = {bi: i for i, bi in enumerate(BIGRAM_ALPHABET)}
 
-# %%
 
 sample_ua_text = """
 Відколи Івана Дідуха запам'ятали в селі газдою, відтоді він мав усе лиш одного коня і малий візок із дубовим дишлем. Коня запрягав у підруку, сам себе в борозну; на коня мав ремінну шлею і нашильник, а на себе Іван накладав малу мотузяну шлею. Нашильника не потребував, бо лівою рукою спирав, може, ліпше, як нашильником.
@@ -50,8 +50,6 @@ corpus_clean = normalize(big_ua_text)
 print("Corpus length:", len(corpus_clean))
 corpus_clean[:200]
 
-
-# %%
 def corpus_slice_generator(corpus_text: str, length: int) -> str:
     """Return a random contiguous slice of `length` characters from the corpus."""
     if length <= 0:
@@ -61,12 +59,6 @@ def corpus_slice_generator(corpus_text: str, length: int) -> str:
     start_idx = random.randint(0, len(corpus_text) - length)
     end_idx = start_idx + length
     return corpus_text[start_idx:end_idx]
-
-
-# %%
-import nltk
-from nltk.util import ngrams
-from collections import Counter
 
 
 unigrams = Counter(ngrams(corpus_clean, 1))
@@ -115,8 +107,6 @@ def affine_cipher(text: str, alphabet: list[str], l: int = 1, k: tuple[int, int]
 
     return "".join(out)
 
-
-# %%
 def vigenere_cipher(text: str, key: str, alphabet: list[str]) -> str:
     m = len(alphabet)
     idx = {ch: i for i, ch in enumerate(alphabet)}
@@ -133,55 +123,93 @@ def vigenere_cipher(text: str, key: str, alphabet: list[str]) -> str:
             out.append(ch)
     return "".join(out)
 
+def ring_abc(alphabet, n=10):
+    s0, s1 = random.choices(alphabet, k=2)
+    idx = {ch: i for i, ch in enumerate(alphabet)}
+    S = [s0, s1]
+    for i in range(2, n):
+        yi = (idx[S[i-1]] + idx[S[i-2]]) % len(alphabet)
+        S.append(alphabet[yi])     
+    return ''.join(S)
+
+ring_abc(BIGRAM_ALPHABET)
+
 
 # %%
-import math
-from collections import Counter
-from typing import Dict, Set
 
-from nltk.util import ngrams
 
-def _prepare_forbidden_data(text: str, l: int, h: int, freq_ref: Dict[str, float]):
-    
-    A_prh = build_sets(freq_ref, h, mode="rare")
-    
+def build_sets(freq_ref: Dict[str, float], h: int, mode: str = "rare") -> list[str]:
+    """Return a list of n-grams selected by frequency."""
+    if h <= 0 or not freq_ref:
+        return []
+
+    mode_key = mode.lower()
+    if mode_key == "rare":
+        sorted_items = sorted(freq_ref.items(), key=lambda kv: kv[1])
+    elif mode_key in {"top", "common"}:
+        sorted_items = sorted(freq_ref.items(), key=lambda kv: kv[1], reverse=True)
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    return [ngram for ngram, _ in sorted_items[:h]]
+
+_FORBIDDEN_CACHE: Dict[tuple[int, int, str], tuple[str, ...]] = {}
+
+def get_forbidden_set(freq_ref: Dict[str, float], h: int, mode: str = "rare") -> tuple[str, ...]:
+    mode_key = mode.lower()
+    key = (id(freq_ref), h, mode_key)
+    if key not in _FORBIDDEN_CACHE:
+        _FORBIDDEN_CACHE[key] = tuple(build_sets(freq_ref, h, mode=mode))
+    return _FORBIDDEN_CACHE[key]
+
+def compute_forbidden_frequencies(text: str, l: int, forbidden: tuple[str, ...]) -> Dict[str, float]:
+    if not forbidden:
+        return {}
+    if len(text) < l:
+        return {ng: 0.0 for ng in forbidden}
+
     cnt = Counter(ngrams(text, l))
     N = len(text) - l + 1
-    
-    freq_obs = {
-        x: cnt.get(x, 0) / N
-        for x in A_prh
+    return {
+        ng: cnt.get(tuple(ng), 0) / N
+        for ng in forbidden
     }
-    
-    return A_prh, freq_obs
-    
-def criterion_1_0(text: str, l: int, h: int, freq_ref: Dict[str, float]) -> float:
-    A_prh, _ = _prepare_forbidden_data(text, l, h, freq_ref)
-    for i in range(len(text) - l + 1):
-        if text[i:i+l] in A_prh:
-            return 1 
-            
-    return 0
 
-def criterion_1_1(text: str, l: int, h: int, freq_ref: Dict[str, float]) -> float:
-    A_prh, freq_obs = _prepare_forbidden_data(text, l, h, freq_ref)
-    
-    unique_forbidden_hits = sum(1 for freq in freq_obs.values() if freq > 0)
-    
-    return unique_forbidden_hits
+def criterion_1_0(text: str, l: int, h: int, freq_ref: Dict[str, float], *, forbidden: tuple[str, ...] | None = None) -> float:
+    if forbidden is None:
+        forbidden = get_forbidden_set(freq_ref, h)
+    if not forbidden:
+        return 0.0
 
+    end = len(text) - l + 1
+    if end <= 0:
+        return 0.0
 
-def criterion_1_2(text: str, l: int, h: int, freq_ref: Dict[str, float]) -> float:
-    A_prh, freq_obs = _prepare_forbidden_data(text, l, h, freq_ref)
-    
-    return max(freq_obs.values()) if freq_obs else 0
+    for i in range(end):
+        if text[i:i + l] in forbidden:
+            return 1.0
+    return 0.0
 
-def criterion_1_3(text: str, l: int, h: int, freq_ref: Dict[str, float]) -> float:
-    A_prh, freq_obs = _prepare_forbidden_data(text, l, h, freq_ref)
-    
-    F_p = sum(freq_obs.values())
-    
-    return F_p
+def criterion_1_1(text: str, l: int, h: int, freq_ref: Dict[str, float], *, forbidden: tuple[str, ...] | None = None, freq_obs: Dict[str, float] | None = None) -> float:
+    if forbidden is None:
+        forbidden = get_forbidden_set(freq_ref, h)
+    if freq_obs is None:
+        freq_obs = compute_forbidden_frequencies(text, l, forbidden)
+    return float(sum(1 for freq in freq_obs.values() if freq > 0))
+
+def criterion_1_2(text: str, l: int, h: int, freq_ref: Dict[str, float], *, forbidden: tuple[str, ...] | None = None, freq_obs: Dict[str, float] | None = None) -> float:
+    if forbidden is None:
+        forbidden = get_forbidden_set(freq_ref, h)
+    if freq_obs is None:
+        freq_obs = compute_forbidden_frequencies(text, l, forbidden)
+    return float(max(freq_obs.values(), default=0.0))
+
+def criterion_1_3(text: str, l: int, h: int, freq_ref: Dict[str, float], *, forbidden: tuple[str, ...] | None = None, freq_obs: Dict[str, float] | None = None) -> float:
+    if forbidden is None:
+        forbidden = get_forbidden_set(freq_ref, h)
+    if freq_obs is None:
+        freq_obs = compute_forbidden_frequencies(text, l, forbidden)
+    return float(sum(freq_obs.values()))
 
 def entropy_per_symbol(freq: Dict[str, float], l: int) -> float:
     total = sum(freq.values())
@@ -193,14 +221,13 @@ def entropy_per_symbol(freq: Dict[str, float], l: int) -> float:
 
 def entropy_for_text(text: str, l: int) -> float:
     counts = Counter(ngrams(text, l))
-    freqs = {''.join(ng): cnt/(len(text) - l + 1) for ng, cnt in counts.items()}
+    freqs = {''.join(ng): cnt / (len(text) - l + 1) for ng, cnt in counts.items()}
     return entropy_per_symbol(counts, l)
 
 def criterion_3_0(text: str, l: int, freq_ref: Dict[str, float], k_h: float) -> dict:
     ref_entropy = entropy_per_symbol(freq_ref, l)
     obs_entropy = entropy_for_text(text, l)
     diff = abs(ref_entropy - obs_entropy)
-    print(f"Ref entropy: {ref_entropy}, Obs entropy: {obs_entropy}, Diff: {diff}")
     return diff > k_h
 
 def index_of_coincidence(counts: Dict[str, int]) -> float:
@@ -224,15 +251,15 @@ def top_ngrams(freq_ref: Dict[str, float], j: int) -> list[str]:
 def criterion_5_1(text: str, l: int, freq_ref: Dict[str, float], j: int, k_empt: int) -> dict:
     top = top_ngrams(freq_ref, j)
     counts = Counter(ngrams(text, l))
-    total_boxes = len(top)
-    empty_boxes = sum(1 for ng in top if counts.get(tuple(ng), 0) == 0)
-    print(f"Top ngrams: {top}, Counts: {counts}, Empty boxes: {empty_boxes}")
-    return  empty_boxes >= k_empt
+    if not top:
+        return False
+    if not counts:
+        empty_boxes = len(top)
+    else:
+        empty_boxes = sum(1 for ng in top if counts.get(tuple(ng), 0) == 0)
+    return empty_boxes >= k_empt
 
-CRITERIA_1 = {'1.0': criterion_1_0,
-            '1.1': criterion_1_1,
-            '1.2': criterion_1_2,
-            '1.3': criterion_1_3}
+
 
 # %%
 random_string = lambda k: ''.join(random.choices(UA_ALPHABET, k=k))
@@ -307,20 +334,13 @@ distorted_texts = generate_dataset(corpus_clean, UA_ALPHABET, L_values, N_counts
 random_texts = generate_random(UA_ALPHABET, L_values, N_counts)
 
 
-# %%
-def ring_abc(alphabet, n=10):
-    s0, s1 = random.choices(alphabet, k=2)
-    idx = {ch: i for i, ch in enumerate(alphabet)}
-    S = [s0, s1]
-    for i in range(2, n):
-        yi = (idx[S[i-1]] + idx[S[i-2]]) % len(alphabet)
-        S.append(alphabet[yi])     
-    return ''.join(S)
-
-ring_abc(BIGRAM_ALPHABET)
 
 # %%
-t1 = all_datasets[100]['Vigenere_K1'][0]
+
+
+
+# %%
+t1 = distorted_texts[100]['Vigenere K1'][0]
 
 
 # %%
@@ -346,40 +366,246 @@ print(a, b)
 # # 
 
 # %%
-
 hs = {10: 3,
      100: 1,
      1000: 1,
      10000: 1}
 
-for L, texts in all_datasets.items():
+ORDER = ['1.0', '1.1', '1.2', '1.3', '3.0', '5.1']
+
+for L in sorted(distorted_texts.keys()):
+    if L not in hs:
+        continue
     h = hs[L]
-    print(f'{L=}, {h=}')
-    for d_m, XY in texts.items():
-        for l in 1, 2:
-            print(f'Cipher={d_m}, {l=}')
-            for name, criterion_ in CRITERIA_1.items():
-                print(f'  Criterion={name}')
-                a = 0
-                b = 0
-                for (x, y) in XY:
-                    a += criterion_(x, l=l, h=h, freq_ref=uni_freq)
-                    b += (1 - criterion_(y, l=l, h=h, freq_ref=uni_freq))
-                print(a, b)
-            a = 0
-            b = 0
-            print(f' Criterion=3.0')
-            for (x, y) in XY:
-                a += criterion_3_0(x, l=l, freq_ref=uni_freq, k_h=0.1)
-                b += (1 - criterion_3_0(y, l=l, freq_ref=uni_freq, k_h=0.1))
-            print(a, b)
-            a = 0
-            b = 0
-            print(f' Criterion=5.1')
-            for (x, y) in XY:
-                a += criterion_5_1(x, l=l, freq_ref=uni_freq, j=50, k_empt=5)
-                b += (1 - criterion_5_1(y, l=l, freq_ref=uni_freq, j=50, k_empt=5))
-            print(a, b)
+    for method, pairs in distorted_texts[L].items():
+        print(f"L={L} | Method={method}")
+        results = {name: {1: (0, 0), 2: (0, 0)} for name in ORDER}
+        for l in (1, 2):
+            freq_ref = uni_freq if l == 1 else bi_freq
+            forbidden = get_forbidden_set(freq_ref, h)
+            cache = []
+            for x, y in pairs:
+                freq_x = compute_forbidden_frequencies(x, l, forbidden)
+                freq_y = compute_forbidden_frequencies(y, l, forbidden)
+                cache.append((x, y, freq_x, freq_y))
+
+            fp_10 = sum(int(criterion_1_0(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden)) for x, _, _, _ in cache)
+            fn_10 = sum(1 - int(criterion_1_0(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden)) for _, y, _, _ in cache)
+            results['1.0'][l] = (fp_10, fn_10)
+
+            fp_11 = sum(int(criterion_1_1(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in cache)
+            fn_11 = sum(1 - int(criterion_1_1(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in cache)
+            results['1.1'][l] = (fp_11, fn_11)
+
+            fp_12 = sum(int(criterion_1_2(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in cache)
+            fn_12 = sum(1 - int(criterion_1_2(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in cache)
+            results['1.2'][l] = (fp_12, fn_12)
+
+            fp_13 = sum(int(criterion_1_3(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in cache)
+            fn_13 = sum(1 - int(criterion_1_3(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in cache)
+            results['1.3'][l] = (fp_13, fn_13)
+
+            fp_30 = sum(int(criterion_3_0(x, l=l, freq_ref=freq_ref, k_h=0.1)) for x, _, _, _ in cache)
+            fn_30 = sum(1 - int(criterion_3_0(y, l=l, freq_ref=freq_ref, k_h=0.1)) for _, y, _, _ in cache)
+            results['3.0'][l] = (fp_30, fn_30)
+
+            fp_51 = sum(int(criterion_5_1(x, l=l, freq_ref=freq_ref, j=50, k_empt=5)) for x, _, _, _ in cache)
+            fn_51 = sum(1 - int(criterion_5_1(y, l=l, freq_ref=freq_ref, j=50, k_empt=5)) for _, y, _, _ in cache)
+            results['5.1'][l] = (fp_51, fn_51)
+
+        for name in ORDER:
+            fp1, fn1 = results[name][1]
+            fp2, fn2 = results[name][2]
+            print(f"  Criterion {name}: FP(l=1)={fp1}, FN(l=1)={fn1}, FP(l=2)={fp2}, FN(l=2)={fn2}")
+        print()
+
+
+
+# %%
+import bz2
+from statistics import mean
+
+def bwt_compressed_size(text: str) -> int:
+    data = text.encode('utf-8')
+    return len(bz2.compress(data))
+
+def compression_stats(texts, sample_size=None):
+    if sample_size is not None and sample_size > 0:
+        texts = texts[:sample_size]
+    sizes = []
+    ratios = []
+    for text in texts:
+        original_size = len(text.encode('utf-8'))
+        if original_size == 0:
+            continue
+        compressed_size = bwt_compressed_size(text)
+        sizes.append(compressed_size)
+        ratios.append(compressed_size / original_size)
+    count = len(sizes)
+    avg_size = mean(sizes) if sizes else 0.0
+    avg_ratio = mean(ratios) if ratios else 0.0
+    return count, avg_size, avg_ratio
+
+
+
+# %%
+COMPRESSION_SAMPLE_SIZE = 200
+
+for L in sorted(distorted_texts.keys()):
+    print(f"Compression analysis | L={L}")
+    for method, pairs in distorted_texts[L].items():
+        sample_pairs = pairs[:COMPRESSION_SAMPLE_SIZE] if COMPRESSION_SAMPLE_SIZE else pairs
+        originals = [x for x, _ in sample_pairs]
+        distorted_versions = [y for _, y in sample_pairs]
+        n_orig, avg_size_orig, avg_ratio_orig = compression_stats(originals, sample_size=None)
+        n_dist, avg_size_dist, avg_ratio_dist = compression_stats(distorted_versions, sample_size=None)
+        print(f"  Method={method} | samples={n_orig}")
+        print(f"    Original  : avg_compressed_bytes={avg_size_orig:.2f}, avg_ratio={avg_ratio_orig:.3f}")
+        print(f"    Distorted : avg_compressed_bytes={avg_size_dist:.2f}, avg_ratio={avg_ratio_dist:.3f}")
+    print()
+
+for L in sorted(random_texts.keys()):
+    print(f"Compression analysis on random texts | L={L}")
+    for method, texts in random_texts[L].items():
+        sample_texts = texts[:COMPRESSION_SAMPLE_SIZE] if COMPRESSION_SAMPLE_SIZE else texts
+        n_rand, avg_size_rand, avg_ratio_rand = compression_stats(sample_texts, sample_size=None)
+        print(f"  Method={method} | samples={n_rand}")
+        print(f"    Random : avg_compressed_bytes={avg_size_rand:.2f}, avg_ratio={avg_ratio_rand:.3f}")
+    print()
+
+
+
+# %%
+ORDER = ['1.0', '1.1', '1.2', '1.3', '3.0', '5.1']
+
+for L in sorted(random_texts.keys()):
+    if L not in hs:
+        continue
+    h = hs[L]
+    for method, texts in random_texts[L].items():
+        print(f"Random texts | L={L} | Method={method}")
+        results = {name: {1: 0, 2: 0} for name in ORDER}
+        for l in (1, 2):
+            freq_ref = uni_freq if l == 1 else bi_freq
+            forbidden = get_forbidden_set(freq_ref, h)
+            freq_cache = [compute_forbidden_frequencies(text, l, forbidden) for text in texts]
+
+            results['1.0'][l] = sum(int(not bool(criterion_1_0(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden))) for text in texts)
+            results['1.1'][l] = sum(int(not bool(criterion_1_1(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            results['1.2'][l] = sum(int(not bool(criterion_1_2(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            results['1.3'][l] = sum(int(not bool(criterion_1_3(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            results['3.0'][l] = sum(int(not bool(criterion_3_0(text, l=l, freq_ref=freq_ref, k_h=0.1))) for text in texts)
+            results['5.1'][l] = sum(int(not bool(criterion_5_1(text, l=l, freq_ref=freq_ref, j=50, k_empt=5))) for text in texts)
+
+        for name in ORDER:
+            fn1 = results[name][1]
+            fn2 = results[name][2]
+            print(f"  Criterion {name}: FN(l=1)={fn1}, FN(l=2)={fn2}")
+        print()
+
+
+
+# %%
+
+
+# %%
+hs = {10: 3,
+     100: 1,
+     1000: 1,
+     10000: 1}
+
+ORDER = ['1.0', '1.1', '1.2', '1.3', '3.0', '5.1']
+
+for L in sorted(distorted_texts.keys()):
+    if L not in hs:
+        continue
+    h = hs[L]
+    for method, pairs in distorted_texts[L].items():
+        print(f"L={L} | Method={method}")
+        summaries = {name: {1: (0, 0), 2: (0, 0)} for name in ORDER}
+        for l in (1, 2):
+            freq_ref = uni_freq if l == 1 else bi_freq
+            forbidden = get_forbidden_set(freq_ref, h)
+            data = []
+            for x, y in pairs:
+                freq_x = compute_forbidden_frequencies(x, l, forbidden)
+                freq_y = compute_forbidden_frequencies(y, l, forbidden)
+                data.append((x, y, freq_x, freq_y))
+
+            fp_10 = sum(int(criterion_1_0(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden)) for x, _, _, _ in data)
+            fn_10 = sum(1 - int(criterion_1_0(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden)) for _, y, _, _ in data)
+            summaries['1.0'][l] = (fp_10, fn_10)
+
+            fp_11 = sum(int(criterion_1_1(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in data)
+            fn_11 = sum(1 - int(criterion_1_1(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in data)
+            summaries['1.1'][l] = (fp_11, fn_11)
+
+            fp_12 = sum(int(criterion_1_2(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in data)
+            fn_12 = sum(1 - int(criterion_1_2(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in data)
+            summaries['1.2'][l] = (fp_12, fn_12)
+
+            fp_13 = sum(int(criterion_1_3(x, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_x)) for x, _, freq_x, _ in data)
+            fn_13 = sum(1 - int(criterion_1_3(y, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_y)) for _, y, _, freq_y in data)
+            summaries['1.3'][l] = (fp_13, fn_13)
+
+            fp_30 = sum(int(criterion_3_0(x, l=l, freq_ref=freq_ref, k_h=0.1)) for x, _, _, _ in data)
+            fn_30 = sum(1 - int(criterion_3_0(y, l=l, freq_ref=freq_ref, k_h=0.1)) for _, y, _, _ in data)
+            summaries['3.0'][l] = (fp_30, fn_30)
+
+            fp_51 = sum(int(criterion_5_1(x, l=l, freq_ref=freq_ref, j=50, k_empt=5)) for x, _, _, _ in data)
+            fn_51 = sum(1 - int(criterion_5_1(y, l=l, freq_ref=freq_ref, j=50, k_empt=5)) for _, y, _, _ in data)
+            summaries['5.1'][l] = (fp_51, fn_51)
+
+        for name in ORDER:
+            fp1, fn1 = summaries[name][1]
+            fp2, fn2 = summaries[name][2]
+            print(f"  Criterion {name}: FP(l=1)={fp1}, FN(l=1)={fn1}, FP(l=2)={fp2}, FN(l=2)={fn2}")
+        print()
+
+
+
+# %%
+for L in sorted(random_texts.keys()):
+    if L not in hs:
+        continue
+    h = hs[L]
+    for method, texts in random_texts[L].items():
+        print(f"Random texts | L={L} | Method={method}")
+        results = {name: {1: 0, 2: 0} for name in ORDER}
+        for l in (1, 2):
+            freq_ref = uni_freq if l == 1 else bi_freq
+            forbidden = get_forbidden_set(freq_ref, h)
+            freq_cache = [compute_forbidden_frequencies(text, l, forbidden) for text in texts]
+
+            errors_10 = sum(int(not bool(criterion_1_0(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden))) for text in texts)
+            errors_11 = sum(int(not bool(criterion_1_1(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            errors_12 = sum(int(not bool(criterion_1_2(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            errors_13 = sum(int(not bool(criterion_1_3(text, l=l, h=h, freq_ref=freq_ref, forbidden=forbidden, freq_obs=freq_obs))) for text, freq_obs in zip(texts, freq_cache))
+            errors_30 = sum(int(not bool(criterion_3_0(text, l=l, freq_ref=freq_ref, k_h=0.1))) for text in texts)
+            errors_51 = sum(int(not bool(criterion_5_1(text, l=l, freq_ref=freq_ref, j=50, k_empt=5))) for text in texts)
+
+            results['1.0'][l] = errors_10
+            results['1.1'][l] = errors_11
+            results['1.2'][l] = errors_12
+            results['1.3'][l] = errors_13
+            results['3.0'][l] = errors_30
+            results['5.1'][l] = errors_51
+
+        for name in ORDER:
+            fn1 = results[name][1]
+            fn2 = results[name][2]
+            print(f"  Criterion {name}: FN(l=1)={fn1}, FN(l=2)={fn2}")
+        print()
+
+
+
+# %%
+
+
+# %%
+
+
+# %%
 
 
 # %%
