@@ -1,3 +1,4 @@
+# %%
 
 import math, random, itertools
 from collections import Counter
@@ -239,6 +240,7 @@ def run_eval(distorted_texts, random_texts):
                     m = evaluate_boolean_predictions(y_true, preds[c])
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
+        # Random: H0 originals vs H1 randoms
         for l in (1,2):
             fr      = refs[l]["freq_ref"]
             Aprh3   = refs[l]["Aprh3"]
@@ -330,14 +332,154 @@ def ratio_rle_cyr(s: str) -> float:
     c = compress_rle_cyr(s)
     return len(c) / len(s)
 
+
+from collections import Counter
+import random
+
+LOW = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
+UP  = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"  # codeletters
+SEP = "ЮЯ"     # header entry sep (letters-only, won’t appear in body)
+KV  = "ЮЄ"     # header key/value sep
+END = "ЩЩЩЩ"   # end-of-header
+
+
+def ngram_counts(s: str, n: int) -> Counter:
+    N = len(s) - n + 1
+    if N <= 0: return Counter()
+    return Counter(s[i:i+n] for i in range(N))
+
+def nonoverlap_positions(s: str, pat: str):
+    i, L, P = 0, len(s), len(pat)
+    pos=[]
+    while True:
+        j = s.find(pat, i)
+        if j < 0: break
+        pos.append(j)
+        i = j + P
+    return pos
+
+def apply_nonoverlap(s: str, pat: str, code: str) -> str:
+    i=0; P=len(pat); out=[]
+    while True:
+        j = s.find(pat, i)
+        if j < 0:
+            out.append(s[i:]); break
+        out.append(s[i:j]); out.append(code)
+        i = j + P
+    return "".join(out)
+
+def compress_ngram_cyr(s: str, maxN: int = 6, maxCodes: int = 26) -> str:
+    s = norm_ua(s)
+    if not s: return END  
+    mapping = []                 
+    used = set()
+    body = s
+    for _ in range(maxCodes):
+        code = next((c for c in UP if c not in used), None)
+        if not code: break
+        best = (None, 0, None)   
+        for n in range(maxN, 1, -1):
+            cnt = ngram_counts(body, n)
+            for pat, oc in cnt.items():
+                if oc < 2: continue
+                pos = nonoverlap_positions(body, pat)
+                k = len(pos)
+                if k < 2: continue
+                H = len(pat) + len(KV) + 1 + len(SEP)
+                gain = k * (len(pat) - 1) - H
+                if gain > best[1]:
+                    best = (pat, gain, pos)
+        if best[0] is None or best[1] <= 0:
+            break
+        pat, _, _ = best
+        body = apply_nonoverlap(body, pat, code)
+        mapping.append((pat, code))
+        used.add(code)
+    header = "".join(c + KV + p + SEP for p, c in mapping) + END + " "
+    return header + body
+
+def decompress_ngram_cyr(blob: str) -> str:
+    pos = blob.find(END)
+    if pos == -1: 
+        return blob
+    hdr = blob[:pos]
+    body = blob[pos+len(END):]
+    if body.startswith(" "): body = body[1:]
+    dec = {}
+    i = 0
+    while i < len(hdr):
+        j = hdr.find(SEP, i)
+        if j == -1: break
+        entry = hdr[i:j]
+        m = entry.find(KV)
+        if m != -1:
+            code = entry[:m]     
+            pat  = entry[m+len(KV):]  
+            if code and pat:
+                dec[code] = pat
+        i = j + len(SEP)
+    out=[]
+    for ch in body:
+        if ch in dec: out.append(dec[ch])
+        else: out.append(ch)
+    return "".join(out)
+
+def ratio_ngram_cyr(s: str) -> float:
+    s = normalize(s)
+
+    c = compress_ngram_cyr(s)
+    return len(c) / len(s)
+
+
+
+def compression_criterion_ngram(text: str):
+    text = normalize(text)
+    r_text = ratio_ngram_cyr(text)
+
+
+    return r_text
+
+
+s = """Ти знаєш, що ти — людина.
+Ти знаєш про це чи ні?
+Усмішка твоя — єдина,
+Мука твоя — єдина,
+Очі твої — одні.
+
+Більше тебе не буде.
+Завтра на цій землі
+Інші ходитимуть люди,
+Інші кохатимуть люди —
+Добрі, ласкаві й злі.
+
+Сьогодні усе для тебе —
+Озера, гаї, степи.
+І жити спішити треба,
+Кохати спішити треба —
+Гляди ж не проспи!
+
+Бо ти на землі — людина,
+І хочеш того чи ні —
+Усмішка твоя — єдина,
+Мука твоя — єдина,
+Очі твої — одні."""
+t = normalize(s)  
+comp = compress_ngram_cyr(t)
+rest = decompress_ngram_cyr(comp)
+print("compressed:", comp[:120] + ("..." if len(comp)>120 else ""))
+print("roundtrip ok:", rest == t)
+print("comp ratio :", compression_criterion_ngram(t))
+
+
+
 def compression_criterion(
     text: str,
     method: str = "rle"
 ):
+    methods = {'rle': ratio_rle_cyr, 'zlib': ratio_zlib, 'ngram': ratio_ngram_cyr}
     text = normalize(text)
 
-    comp_ratio = ratio_rle_cyr if method == "rle" else ratio_zlib
-
+    comp_ratio = methods[method]
     r_text = comp_ratio(text)
     
     return r_text
@@ -356,33 +498,53 @@ sample_ua_text = """
 
 
 # %%
-L_values=[1000,10000]
-N_counts={1000:1000,10000:100}
+
+
+# %%
+L_values=[500,5000]
+N_counts={500:1000,5000:100}
 random_texts = generate_random(L_values, N_counts)
 
 # %%
 compression_results = {}
 print("Compression ratios on random texts:")
 for L, texts in random_texts.items():
-    compression_results[L] = {'rle': [], 'zlib': []}
+    compression_results[L] = {'rle': [], 'zlib': [], 'ngram': []}
     for method, samples in texts.items():
         for sample in samples:
             rle_comp = compression_criterion(sample, method="rle")
             zlib_comp = compression_criterion(sample, method="zlib")
+            ngram_comp = compression_criterion(sample, method="ngram")
             compression_results[L]['rle'].append(rle_comp)
             compression_results[L]['zlib'].append(zlib_comp)
+            compression_results[L]['ngram'].append(ngram_comp)
 
     rle_ratios = compression_results[L]['rle']
     zlib_ratios = compression_results[L]['zlib']
+    ngram_ratios = compression_results[L]['ngram']
     print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
     print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
+    print(f"L={L} | NGRAM: mean={sum(ngram_ratios)/len(ngram_ratios):.4f}")
     
 print("Compression ratios on plain texts:")
 for L in L_values:
     plain_texts = [corpus_slice(corpus_clean, L) for _ in range(N_counts[L])]
     rle_ratios = [compression_criterion(text, method="rle") for text in plain_texts]
     zlib_ratios = [compression_criterion(text, method="zlib") for text in plain_texts]
+    ngram_ratios = [compression_criterion(text, method="ngram") for text in plain_texts]
     print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
     print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
+    print(f"L={L} | NGRAM: mean={sum(ngram_ratios)/len(ngram_ratios):.4f}")
 
 # %%
+
+
+
+
+# %%
+1
+
+# %%
+
+
+
