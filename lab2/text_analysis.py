@@ -1,6 +1,4 @@
 
-
-
 import math, random, itertools
 from collections import Counter
 from nltk.util import ngrams
@@ -28,6 +26,8 @@ big_ua_text = corpus_path.read_text(encoding="utf-8")
 corpus_clean = normalize(big_ua_text)
 print("Corpus length:", len(corpus_clean))
 
+
+# %%
 
 def corpus_slice(corpus_text: str, length: int) -> str:
     if length > len(corpus_text):
@@ -79,6 +79,8 @@ def ring_abc(alphabet,n=10):
     return ''.join(S)
 
 
+# %%
+
 random_string=lambda k: ''.join(random.choices(UA_ALPHABET,k=k))
 DISTORTION_METHODS={
     "Vigenere K1":lambda t:vigenere_cipher(t,random_string(1),UA_ALPHABET),
@@ -126,6 +128,7 @@ random_texts=generate_random(L_values,N_counts)
 print("Datasets built.")
 
 
+# %%
 
 def counts_once(text, l):
     N = len(text) - l + 1
@@ -139,6 +142,7 @@ def counts_once(text, l):
     return cnt, N, H / l
 
 
+# %%
 
 def freq_ref_from_corpus(corpus_clean,l):
     total = max(1, len(corpus_clean) - l + 1)
@@ -152,7 +156,7 @@ def build_sets(freq_ref,h,mode="rare"):
         return [ng for ng,_ in sorted(freq_ref.items(), key=lambda kv:kv[1], reverse=True)[:h]]
 
 
-# Precompute
+# Precompute for l=1,2
 refs = {}
 for l in (1,2):
     fr = freq_ref_from_corpus(corpus_clean, l)
@@ -163,8 +167,10 @@ for l in (1,2):
         "Top50": build_sets(fr, 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
     }
-print(f"Reference stats prepared for l=1,2 {refs}")
+print("Reference stats prepared for l=1,2")
 
+
+# %%
 
 def c_1_0(cnt, N, Aprh3):  # 1.0
     return any(ng in cnt for ng in Aprh3)
@@ -183,7 +189,7 @@ def c_1_3(cnt, N, Aprh10, freq_ref):  # 1.3
     ref = sum(freq_ref.get(ng,0.0) for ng in Aprh10)
     return obs > ref
 
-def c_3_0(H_obs, H_lang, k_H=0.1):  
+def c_3_0(H_obs, H_lang, k_H=0.1):  # 3.0
     return abs(H_obs - H_lang) > k_H
 
 def c_5_1(cnt, N, top_list, k_empt=5):  # 5.1
@@ -233,7 +239,6 @@ def run_eval(distorted_texts, random_texts):
                     m = evaluate_boolean_predictions(y_true, preds[c])
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
-        # Random: ignore α
         for l in (1,2):
             fr      = refs[l]["freq_ref"]
             Aprh3   = refs[l]["Aprh3"]
@@ -260,11 +265,124 @@ def run_eval(distorted_texts, random_texts):
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
 
+# %%
+smol_distorted_texts={10: distorted_texts[10], 100: distorted_texts[100]}
+smol_random_texts={10: random_texts[10], 100: random_texts[100]}
+run_eval(smol_distorted_texts, smol_random_texts)
 
-
+# %%
 run_eval(distorted_texts, random_texts)
 
 # %%
+c_1_0(distorted_texts[100]['Vigenere K5'][1], 10, refs[1]["Aprh3"])
+
+# %%
+import zlib, random, math
+from collections import Counter
 
 
+def alphabet_of(text: str) -> str:
+    return "".join(k for k, _ in Counter(text).most_common())
 
+def sample_random_like(text: str, n: int) -> str:
+    alpha = alphabet_of(text) or UA_ALPHABET
+    return "".join(random.choice(alpha) for _ in range(len(text)))
+
+def ratio_zlib(s: str, level: int = 9) -> float:
+    b = s.encode("utf-8")
+    if not b:
+        return 1.0
+    c = zlib.compress(b, level)
+    return len(c) / len(b)
+
+
+UPPER_CYR = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"
+LOWER_CYR = UA_ALPHABET
+
+def _enc_cyr(n: int) -> str:
+    if n <= 0:
+        return UPPER_CYR[0]
+    base = len(UPPER_CYR)
+    out = []
+    while n > 0:
+        n -= 1
+        out.append(UPPER_CYR[n % base])
+        n //= base
+    return "".join(reversed(out))
+
+def compress_rle_cyr(s: str) -> str:
+    if not s:
+        return ""
+    out = []
+    i = 0
+    while i < len(s):
+        j = i + 1
+        while j < len(s) and s[j] == s[i]:
+            j += 1
+        run_len = j - i
+        out.append(s[i] + _enc_cyr(run_len))
+        i = j
+    return "".join(out)
+
+def ratio_rle_cyr(s: str) -> float:
+    if not s:
+        return 1.0
+    c = compress_rle_cyr(s)
+    return len(c) / len(s)
+
+def compression_criterion(
+    text: str,
+    method: str = "rle"
+):
+    text = normalize(text)
+
+    comp_ratio = ratio_rle_cyr if method == "rle" else ratio_zlib
+
+    r_text = comp_ratio(text)
+    
+    return r_text
+
+
+sample_ua_text = """
+Відколи Івана Дідуха запам'ятали в селі газдою, відтоді він мав усе лиш одного коня і малий візок із дубовим дишлем. Коня запрягав у підруку, сам себе в борозну; на коня мав ремінну шлею і нашильник, а на себе Іван накладав малу мотузяну шлею. Нашильника не потребував, бо лівою рукою спирав, може, ліпше, як нашильником.
+То як тягнули снопи з поля або гній у поле, то однако і на коні, і на Івані жили виступали, однако їм обом під гору посторонки моцувалися, як струнви, і однако з гори волочилися по землі. Догори ліз кінь як по леду, а Івана як коли би хто буком по чолі тріснув, така велика жила напухала йому на чолі. Згори кінь виглядав, як би Іван його повісив на нашильнику за якусь велику провину, а ліва рука Івана обвивалася сітею синіх жил, як ланцюгом із синьої сталі.
+Не раз ранком, іще перед сходом сонця, їхав Іван у поле пільною доріжкою. Шлеї не мав на собі, лише йшов із правого боку і тримав дишель як би під пахою. І кінь, і Іван держалися крепко, бо оба відпочали через ніч. То як їм траплялося сходити з горба, то бігли. Бігли вдолину і лишали за собою сліди коліс, копит і широчезних п'ят Іванових. Придорожнє зілля і бадилля гойдалося, вихолітувалося на всі боки за возом і скидало росу на ті сліди. Але часом серед найбільшого розгону на самій середині гори Іван починав налягати на ногу і спирав коня. Сідав коло дороги, брав ногу в руки і слинив, аби найти те місце, де бодяк забився.
+— Та цу ногу сапов шкребчи, не ти її слинов промивай, — говорив Іван іспересердя.
+— Діду Іване, а батюгов того борозного, най біжить, коли овес поїдає...
+Відкрити аудіокнигу на YouTube
+Це хтось так брав на сміх Івана, що видів його патороч зі свого поля. Але Іван здавна привик до таких сміхованців і спокійно тягнув бодяк дальше. Як не міг бодяка витягнути, то кулаком його вгонив далі в ногу і, встаючи, казав:
+— Не біси, вігниєш та й сам віпадеш, а я не маю чєсу з тобою панькатися...
+"""
+
+
+# %%
+L_values=[1000,10000]
+N_counts={1000:1000,10000:100}
+random_texts = generate_random(L_values, N_counts)
+
+# %%
+compression_results = {}
+print("Compression ratios on random texts:")
+for L, texts in random_texts.items():
+    compression_results[L] = {'rle': [], 'zlib': []}
+    for method, samples in texts.items():
+        for sample in samples:
+            rle_comp = compression_criterion(sample, method="rle")
+            zlib_comp = compression_criterion(sample, method="zlib")
+            compression_results[L]['rle'].append(rle_comp)
+            compression_results[L]['zlib'].append(zlib_comp)
+
+    rle_ratios = compression_results[L]['rle']
+    zlib_ratios = compression_results[L]['zlib']
+    print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
+    print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
+    
+print("Compression ratios on plain texts:")
+for L in L_values:
+    plain_texts = [corpus_slice(corpus_clean, L) for _ in range(N_counts[L])]
+    rle_ratios = [compression_criterion(text, method="rle") for text in plain_texts]
+    zlib_ratios = [compression_criterion(text, method="zlib") for text in plain_texts]
+    print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
+    print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
+
+# %%
