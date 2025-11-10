@@ -7,7 +7,7 @@ from pathlib import Path
 
 random.seed(42)
 
-UA_ALPHABET = list("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
+UA_ALPHABET = list("абвгдеєжзиіїйклмнопрстуфхцчшщьюя")
 BIGRAM_ALPHABET = [f"{a}{b}" for a,b in itertools.product(UA_ALPHABET, UA_ALPHABET)]
 
 def normalize(text: str) -> str:
@@ -15,10 +15,9 @@ def normalize(text: str) -> str:
     normalized = []
     for ch in text.lower():
         if ch in allowed:
-            if not ch == 'ґ':
-                normalized.append(ch)
-            else:   
-                normalized.append('г')
+            normalized.append(ch)
+        elif ch == 'ґ':
+            normalized.append('г')
         
     return ''.join(ch for ch in text.lower() if ch in allowed)
 
@@ -26,6 +25,8 @@ corpus_path = Path("fiction.txt")
 big_ua_text = corpus_path.read_text(encoding="utf-8")
 corpus_clean = normalize(big_ua_text)
 print("Corpus length:", len(corpus_clean))
+
+FREQ_REF = {1: freq_ref_from_corpus(corpus_clean, 1), 2: freq_ref_from_corpus(corpus_clean, 2)}
 
 
 # %%
@@ -50,7 +51,7 @@ def affine_cipher(text, alphabet, l=1, k=None):
     idx = {ch:i for i,ch in enumerate(alphabet)}
     if l==1:
         return ''.join(alphabet[(a*idx[ch]+b)%M] for ch in text)
-    t=text
+    t = text
     if len(t)%2: t+=alphabet[0]
     out=[]
     for i in range(0,len(t),2):
@@ -60,9 +61,9 @@ def affine_cipher(text, alphabet, l=1, k=None):
     return ''.join(out)
 
 def vigenere_cipher(text,key,alphabet):
-    idx={ch:i for i,ch in enumerate(alphabet)}
-    m=len(alphabet)
-    out=[]
+    idx = {ch:i for i,ch in enumerate(alphabet)}
+    m = len(alphabet)
+    out= []
     j=0
     for ch in text:
         k=idx[key[j%len(key)]]
@@ -78,7 +79,6 @@ def ring_abc(alphabet,n=10):
         yi=(idx[S[i-1]]+idx[S[i-2]])%len(alphabet)
         S.append(alphabet[yi])
     return ''.join(S)
-
 
 # %%
 
@@ -150,7 +150,7 @@ def freq_ref_from_corpus(corpus_clean,l):
     cnt = Counter(''.join(ng) for ng in ngrams(corpus_clean, l))
     return {g: c/total for g,c in cnt.items()}
 
-def build_sets(freq_ref,h,mode="rare"):
+def build_sets(freq_ref, h, mode="rare"):
     if mode=="rare":
         return [ng for ng,_ in sorted(freq_ref.items(), key=lambda kv:kv[1])[:h]]
     elif mode in {"top"}:
@@ -164,36 +164,35 @@ for l in (1,2):
     refs[l] = {
         "freq_ref": fr,
         "Aprh3": set(build_sets(fr, 3, "rare")),
-        "Aprh10": set(build_sets(fr,10, "rare")),
+        "Aprh10": set(build_sets(fr, 10, "rare")),
         "Top50": build_sets(fr, 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
     }
-print("Reference stats prepared for l=1,2")
 
 
 # %%
 
-def c_1_0(cnt, N, Aprh3):  # 1.0
-    return any(ng in cnt for ng in Aprh3)
+def c_1_0(cnt, Aprh):
+    return any(ng in cnt for ng in Aprh)  # False = H0
 
-def c_1_1(cnt, N, Aprh10, k=3):  # 1.1
-    occurrences = sum(cnt.get(ng, 0) for ng in Aprh10)
+def c_1_1(cnt, Aprh, k):
+    occurrences = sum(cnt.get(ng, 0) for ng in Aprh)
     return occurrences >= k
 
-def c_1_2(cnt, N, Aprh10, freq_ref):  # 1.2
+def c_1_2(cnt, N, Aprh, freq_ref):
     if N == 0: return True
-    return any( (cnt.get(ng,0)/N) > freq_ref.get(ng, 0.0) for ng in Aprh10 )
+    return any((cnt.get(ng,0)/N) > freq_ref.get(ng, 0.0) for ng in Aprh)
 
-def c_1_3(cnt, N, Aprh10, freq_ref):  # 1.3
+def c_1_3(cnt, N, Aprh, freq_ref):
     if N == 0: return True
-    obs = sum(cnt.get(ng,0) for ng in Aprh10) / N
-    ref = sum(freq_ref.get(ng,0.0) for ng in Aprh10)
+    obs = sum(cnt.get(ng,0) for ng in Aprh) / N
+    ref = sum(freq_ref.get(ng,0.0) for ng in Aprh)
     return obs > ref
 
-def c_3_0(H_obs, H_lang, k_H=0.1):  # 3.0
+def c_3_0(H_obs, H_lang, k_H):
     return abs(H_obs - H_lang) > k_H
 
-def c_5_1(cnt, N, top_list, k_empt=5):  # 5.1
+def c_5_1(cnt, N, top_list, k_empt):
     fempt = sum(1 for ng in top_list if cnt.get(ng, 0) == 0)
     return fempt >= k_empt
 
@@ -202,81 +201,298 @@ def c_5_1(cnt, N, top_list, k_empt=5):  # 5.1
 
 ORDER = ['1.0','1.1','1.2','1.3','3.0','5.1']
 
-def evaluate_boolean_predictions(y_true,y_pred):
-    TP=sum(t and p for t,p in zip(y_true,y_pred))
-    TN=sum((not t) and (not p) for t,p in zip(y_true,y_pred))
-    FP=sum((not t) and p for t,p in zip(y_true,y_pred))
-    FN=sum(t and (not p) for t,p in zip(y_true,y_pred))
-    n_H0=sum(not t for t in y_true)
-    n_H1=sum(t for t in y_true)
-    alpha=FP/n_H0 if n_H0 else 0.0
-    beta=FN/n_H1 if n_H1 else 0.0
-    return dict(alpha=alpha,beta=beta)
+def evaluate_boolean_predictions(y_true_pairs, y_pred_pairs):
+    TP = TN = FP = FN = 0
+    n_H0 = n_H1 = 0
+    for truths, preds in zip(y_true_pairs, y_pred_pairs):
+        for t, p in zip(truths, preds):
+            if t:
+                n_H1 += 1
+                if p:
+                    TP += 1
+                else:
+                    FN += 1
+            else:
+                n_H0 += 1
+                if p:
+                    FP += 1
+                else:
+                    TN += 1
 
-def run_eval(distorted_texts, random_texts):
+    alpha = FP / n_H0 if n_H0 else 0.0
+    beta = FN / n_H1 if n_H1 else 0.0
+    return {'alpha': alpha, 'beta': beta}
+
+def eval_distorted(distorted_texts, refs):
     for L in sorted(distorted_texts.keys()):
-        # Distorted: paired H0 vs H1
         for l in (1,2):
             fr      = refs[l]["freq_ref"]
-            Aprh3   = refs[l]["Aprh3"]
-            Aprh10  = refs[l]["Aprh10"]
+            Aprh1_0   = refs[l]["Aprh1_0"]
+            Aprh1_1  = refs[l]["Aprh1_1"]
             Top50   = refs[l]["Top50"]
             H_lang  = refs[l]["H_lang"]
+            k_11 = refs[l]["k_11"]
+            k_empt = refs[l]['k_empt']
+            k_H = refs[l]['k_H']
 
             for name, pairs in distorted_texts[L].items():
-                y_true=[]; preds={c:[] for c in ORDER}
-                for (x,y) in pairs:
+                y_true = []
+                preds = {c: [] for c in ORDER}
+                HH = []
+                for (x, y) in pairs:
                     cntX, NX, HX = counts_once(x, l)
                     cntY, NY, HY = counts_once(y, l)
-                    y_true.extend([False, True])
-                    preds['1.0'].extend([c_1_0(cntX,NX,Aprh3), c_1_0(cntY,NY,Aprh3)])
-                    preds['1.1'].extend([c_1_1(cntX,NX,Aprh10,3), c_1_1(cntY,NY,Aprh10,3)])
-                    preds['1.2'].extend([c_1_2(cntX,NX,Aprh10,fr), c_1_2(cntY,NY,Aprh10,fr)])
-                    preds['1.3'].extend([c_1_3(cntX,NX,Aprh10,fr), c_1_3(cntY,NY,Aprh10,fr)])
-                    preds['3.0'].extend([c_3_0(HX,H_lang), c_3_0(HY,H_lang)])
-                    preds['5.1'].extend([c_5_1(cntX,NX,Top50,5), c_5_1(cntY,NY,Top50,5)])
+                    y_true.append([False, True])
+                    preds['1.0'].append([c_1_0(cntX, Aprh1_0), c_1_0(cntY, Aprh1_0)])
+                    preds['1.1'].append([c_1_1(cntX, Aprh1_1, k_11), c_1_1(cntY, Aprh1_1, k_11)])
+                    preds['1.2'].append([c_1_2(cntX, NX, Aprh1_1, fr), c_1_2(cntY, NY, Aprh1_1, fr)])
+                    preds['1.3'].append([c_1_3(cntX, NX, Aprh1_1, fr), c_1_3(cntY, NY, Aprh1_1, fr)])
+                    preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY, H_lang, k_H)])
+                    preds['5.1'].append([c_5_1(cntX, NX, Top50, k_empt), c_5_1(cntY, NY, Top50, k_empt)])
+                    HH.append((HX, HY))
                 print(f"Distorted | L={L} | l={l} | {name}")
                 for c in ORDER:
                     m = evaluate_boolean_predictions(y_true, preds[c])
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
 
-        # Random: H0 originals vs H1 randoms
+                print(f"Average entropy differences for X: {sum(abs(hx - H_lang) for hx, hy in HH)/len(HH):.4f}")
+                print(f"Average entropy differences for Y: {sum(abs(hy - H_lang) for hx, hy in HH)/len(HH):.4f}")
+    return preds
+
+
+def eval_random(random_texts, refs):
+    for L in sorted(random_texts.keys()):
         for l in (1,2):
             fr      = refs[l]["freq_ref"]
-            Aprh3   = refs[l]["Aprh3"]
-            Aprh10  = refs[l]["Aprh10"]
+            Aprh1_0   = refs[l]["Aprh1_0"]
+            Aprh1_1  = refs[l]["Aprh1_1"]
             Top50   = refs[l]["Top50"]
             H_lang  = refs[l]["H_lang"]
-
+            k_H = refs[l]["k_H"]
             for name, samples in random_texts[L].items():
                 originals=[corpus_slice(corpus_clean, L) for _ in range(len(samples))]
-                y_true=[]; preds={c:[] for c in ORDER}
+                y_true=[]
+                preds={c: [] for c in ORDER}
+                HH = []
                 for x,y in zip(originals, samples):
                     cntX, NX, HX = counts_once(x, l)
                     cntY, NY, HY = counts_once(y, l)
-                    y_true.extend([False, True])
-                    preds['1.0'].extend([c_1_0(cntX,NX,Aprh3), c_1_0(cntY,NY,Aprh3)])
-                    preds['1.1'].extend([c_1_1(cntX,NX,Aprh10,3), c_1_1(cntY,NY,Aprh10,3)])
-                    preds['1.2'].extend([c_1_2(cntX,NX,Aprh10,fr), c_1_2(cntY,NY,Aprh10,fr)])
-                    preds['1.3'].extend([c_1_3(cntX,NX,Aprh10,fr), c_1_3(cntY,NY,Aprh10,fr)])
-                    preds['3.0'].extend([c_3_0(HX,H_lang), c_3_0(HY,H_lang)])
-                    preds['5.1'].extend([c_5_1(cntX,NX,Top50,5), c_5_1(cntY,NY,Top50,5)])
+                    y_true.append([False, True])
+                    preds['1.0'].append([c_1_0(cntX,NX,Aprh1_0), c_1_0(cntY,NY,Aprh1_0)])
+                    preds['1.1'].append([c_1_1(cntX,Aprh1_1,3), c_1_1(cntY,Aprh1_1,3)])
+                    preds['1.2'].append([c_1_2(cntX,NX,Aprh1_1,fr), c_1_2(cntY,NY,Aprh1_1,fr)])
+                    preds['1.3'].append([c_1_3(cntX,NX,Aprh1_1,fr), c_1_3(cntY,NY,Aprh1_1,fr)])
+                    preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY,H_lang, k_H)])
+                    preds['5.1'].append([c_5_1(cntX,NX,Top50,5), c_5_1(cntY,NY,Top50,5)])
+                    HH.append((HX, HY))
                 print(f"Random | L={L} | l={l} | {name}")
                 for c in ORDER:
                     m = evaluate_boolean_predictions(y_true, preds[c])
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
+                print(f"Average entropy differences for X: {sum(abs(hx - H_lang) for hx, hy in HH)/len(HH):.4f}")
+                print(f"Average entropy differences for Y: {sum(abs(hy - H_lang) for hx, hy in HH)/len(HH):.4f}")
+
+
+
+# %%
+dist_10 = {10: distorted_texts[10]}
+dist_100 = {100: distorted_texts[100]}
+dist_1000 = {1000: distorted_texts[1000]}
+dist_10000 = {10000: distorted_texts[10000]}
+
+
+refs_10 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 7,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.31,
+    
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 2.669,
+        "k_empt": 49,
+    }
+}
+d = eval_distorted(dist_10, refs_10)
 
 
 # %%
-smol_distorted_texts={10: distorted_texts[10], 100: distorted_texts[100]}
-smol_random_texts={10: random_texts[10], 100: random_texts[100]}
-run_eval(smol_distorted_texts, smol_random_texts)
+
+refs_10 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 7,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.31,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 100, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 2.669,
+        "k_empt": 99,
+    }
+}
+d = eval_distorted(dist_10, refs_10)
+
 
 # %%
-run_eval(distorted_texts, random_texts)
+
+refs_10 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 7,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.31,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 150, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 2.669,
+        "k_empt": 148,
+    }
+}
+d = eval_distorted(dist_10, refs_10)
 
 # %%
-c_1_0(distorted_texts[100]['Vigenere K5'][1], 10, refs[1]["Aprh3"])
+refs_100 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.069,
+        "k_empt": 30,
+    }
+}
+d = eval_distorted(dist_100, refs_100)
+
+# %%
+refs_100 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 100, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.069,
+        "k_empt": 70,
+    }
+}
+d = eval_distorted(dist_100, refs_100)
+
+
+
+# %%
+refs_100 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 150, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 1.069,
+        "k_empt": 111,
+    }
+}
+d = eval_distorted(dist_100, refs_100)
+
+# %%
+refs_1000 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
+        "k_11": 9,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+        
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 100, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.3,
+        "k_empt": 70,
+    }
+}
+d = eval_distorted(dist_1000, refs_1000)
+
+# %%
+
+
+# %%
+
 
 # %%
 import zlib, random, math
@@ -290,7 +506,7 @@ def sample_random_like(text: str, n: int) -> str:
     alpha = alphabet_of(text) or UA_ALPHABET
     return "".join(random.choice(alpha) for _ in range(len(text)))
 
-def ratio_zlib(s: str, level: int = 9) -> float:
+def ratio_zlib(s: str, level: int = 1) -> float:
     b = s.encode("utf-8")
     if not b:
         return 1.0
@@ -298,21 +514,21 @@ def ratio_zlib(s: str, level: int = 9) -> float:
     return len(c) / len(b)
 
 
-UPPER_CYR = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"
-LOWER_CYR = UA_ALPHABET
+UPPER_UA = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"
+LOWER_UA = UA_ALPHABET
 
-def _enc_cyr(n: int) -> str:
+def _enc_letters(n: int) -> str:
     if n <= 0:
-        return UPPER_CYR[0]
-    base = len(UPPER_CYR)
+        return UPPER_UA[0]
+    base = len(UPPER_UA)
     out = []
     while n > 0:
         n -= 1
-        out.append(UPPER_CYR[n % base])
+        out.append(UPPER_UA[n % base])
         n //= base
     return "".join(reversed(out))
 
-def compress_rle_cyr(s: str) -> str:
+def compress_rle(s: str) -> str:
     if not s:
         return ""
     out = []
@@ -322,14 +538,14 @@ def compress_rle_cyr(s: str) -> str:
         while j < len(s) and s[j] == s[i]:
             j += 1
         run_len = j - i
-        out.append(s[i] + _enc_cyr(run_len))
+        out.append(s[i] + _enc_letters(run_len))
         i = j
     return "".join(out)
 
-def ratio_rle_cyr(s: str) -> float:
+def ratio_rle(s: str) -> float:
     if not s:
         return 1.0
-    c = compress_rle_cyr(s)
+    c = compress_rle(s)
     return len(c) / len(s)
 
 
@@ -338,9 +554,9 @@ import random
 
 LOW = "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя"
 UP  = "АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ"  # codeletters
-SEP = "ЮЯ"     # header entry sep (letters-only, won’t appear in body)
-KV  = "ЮЄ"     # header key/value sep
-END = "ЩЩЩЩ"   # end-of-header
+SEP = "АЬ"     # header entry sep (letters-only, won’t appear in body)
+KV  = "ОЬ"     # header key/value sep
+END = "ЯЬ"   # end-of-header
 
 
 def ngram_counts(s: str, n: int) -> Counter:
@@ -368,7 +584,7 @@ def apply_nonoverlap(s: str, pat: str, code: str) -> str:
         i = j + P
     return "".join(out)
 
-def compress_ngram_cyr(s: str, maxN: int = 6, maxCodes: int = 26) -> str:
+def compress_ngram(s: str, maxN: int = 6, maxCodes: int = 26) -> str:
     s = norm_ua(s)
     if not s: return END  
     mapping = []                 
@@ -398,7 +614,7 @@ def compress_ngram_cyr(s: str, maxN: int = 6, maxCodes: int = 26) -> str:
     header = "".join(c + KV + p + SEP for p, c in mapping) + END + " "
     return header + body
 
-def decompress_ngram_cyr(blob: str) -> str:
+def decompress_ngram(blob: str) -> str:
     pos = blob.find(END)
     if pos == -1: 
         return blob
@@ -424,17 +640,17 @@ def decompress_ngram_cyr(blob: str) -> str:
         else: out.append(ch)
     return "".join(out)
 
-def ratio_ngram_cyr(s: str) -> float:
+def ratio_ngram(s: str) -> float:
     s = normalize(s)
 
-    c = compress_ngram_cyr(s)
+    c = compress_ngram(s)
     return len(c) / len(s)
 
 
 
 def compression_criterion_ngram(text: str):
     text = normalize(text)
-    r_text = ratio_ngram_cyr(text)
+    r_text = ratio_ngram(text)
 
 
     return r_text
@@ -463,26 +679,127 @@ s = """Ти знаєш, що ти — людина.
 Усмішка твоя — єдина,
 Мука твоя — єдина,
 Очі твої — одні."""
+
 t = normalize(s)  
-comp = compress_ngram_cyr(t)
-rest = decompress_ngram_cyr(comp)
+comp = compress_ngram(t)
+rest = decompress_ngram(comp)
 print("compressed:", comp[:120] + ("..." if len(comp)>120 else ""))
 print("roundtrip ok:", rest == t)
 print("comp ratio :", compression_criterion_ngram(t))
 
+LOW = "абвгдеєжзиіїйклмнопрстуфхцчшщьюя"   
+UP  = "АБВГДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ" 
 
+SEP = "ЮЯ"   
+KV  = "ЮЄ"     
+END = "ЩЩЩЩ"
+SPACE_AFTER_HEADER = " "
+
+
+def _pair_counts(seq: list[str]) -> Counter:
+    return Counter(a + b for a, b in zip(seq, seq[1:]))
+
+def _apply_pair(seq: list[str], pair: str, code: str) -> list[str]:
+    out = []
+    i, n = 0, len(seq)
+    while i < n:
+        if i + 1 < n and (seq[i] + seq[i+1]) == pair:
+            out.append(code)
+            i += 2
+        else:
+            out.append(seq[i])
+            i += 1
+    return out
+
+def _header(mapping: list[tuple[str, str]]) -> str:
+    return "".join(c + KV + p + SEP for p, c in mapping) + END + SPACE_AFTER_HEADER
+
+def compress_bpe_letters(text: str, max_merges: int = 26, min_count: int = 3) -> str:
+    s = norm_ua(text)
+    if not s:
+        return END
+    seq = list(s)
+    mapping: list[tuple[str, str]] = []
+
+    code_iter = iter(UP) 
+    for _ in range(max_merges):
+        counts = _pair_counts(seq)
+        if not counts:
+            break
+        pair, cnt = counts.most_common(1)[0]
+        if cnt < min_count:
+            break
+        try:
+            code = next(code_iter)
+        except StopIteration:
+            break
+        seq = _apply_pair(seq, pair, code)
+        mapping.append((pair, code))
+
+    header = _header(mapping)
+    body = "".join(seq)
+    return header + body
+
+def decompress_bpe_letters(blob: str) -> str:
+    pos = blob.find(END)
+    if pos == -1:
+        return blob 
+    hdr = blob[:pos]
+    body = blob[pos + len(END):]
+    if body.startswith(SPACE_AFTER_HEADER):
+        body = body[1:]
+
+    dec: dict[str, str] = {}
+    i = 0
+    while i < len(hdr):
+        j = hdr.find(SEP, i)
+        if j == -1:
+            break
+        entry = hdr[i:j]
+        m = entry.find(KV)
+        if m != -1:
+            code = entry[:m] 
+            pair = entry[m+len(KV):]  
+            if code and pair:
+                dec[code] = pair
+        i = j + len(SEP)
+
+    changed = True
+    while changed:
+        changed = False
+        out = []
+        for ch in body:
+            if ch in dec:
+                out.append(dec[ch])
+                changed = True
+            else:
+                out.append(ch)
+        body = "".join(out)
+
+    return body
+
+def ratio_bpe(s: str) -> float:
+    s = normalize(s)
+    c = compress_bpe_letters(s)
+    return len(c) / len(s)
+
+
+compression_methods = {
+    'bpe': ratio_bpe,
+    'ngram': ratio_ngram,
+    'rle': ratio_rle,
+    'zlib': ratio_zlib,
+}
 
 def compression_criterion(
     text: str,
-    method: str = "rle"
+    method: Callable
 ):
-    methods = {'rle': ratio_rle_cyr, 'zlib': ratio_zlib, 'ngram': ratio_ngram_cyr}
     text = normalize(text)
-
-    comp_ratio = methods[method]
-    r_text = comp_ratio(text)
-    
+    r_text = method(text)
     return r_text
+
+
 
 
 sample_ua_text = """
@@ -501,40 +818,27 @@ sample_ua_text = """
 
 
 # %%
-L_values=[500,5000]
-N_counts={500:1000,5000:100}
+L_values=[1000, 10000]
+N_counts={1000:100,10000:10}
 random_texts = generate_random(L_values, N_counts)
 
 # %%
 compression_results = {}
 print("Compression ratios on random texts:")
 for L, texts in random_texts.items():
-    compression_results[L] = {'rle': [], 'zlib': [], 'ngram': []}
+    compression_results[L] = {method: [] for method in compression_methods.keys()}
     for method, samples in texts.items():
-        for sample in samples:
-            rle_comp = compression_criterion(sample, method="rle")
-            zlib_comp = compression_criterion(sample, method="zlib")
-            ngram_comp = compression_criterion(sample, method="ngram")
-            compression_results[L]['rle'].append(rle_comp)
-            compression_results[L]['zlib'].append(zlib_comp)
-            compression_results[L]['ngram'].append(ngram_comp)
-
-    rle_ratios = compression_results[L]['rle']
-    zlib_ratios = compression_results[L]['zlib']
-    ngram_ratios = compression_results[L]['ngram']
-    print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
-    print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
-    print(f"L={L} | NGRAM: mean={sum(ngram_ratios)/len(ngram_ratios):.4f}")
+        compression_results[L] = {method: [func(sample) for sample in samples] 
+                                      for method, func in compression_methods.items()}  
+    for method, ratios in compression_results[L].items():
+        print(f"L={L} | {method.upper()}: mean={sum(ratios)/len(ratios):.4f}")
+   
     
 print("Compression ratios on plain texts:")
 for L in L_values:
     plain_texts = [corpus_slice(corpus_clean, L) for _ in range(N_counts[L])]
-    rle_ratios = [compression_criterion(text, method="rle") for text in plain_texts]
-    zlib_ratios = [compression_criterion(text, method="zlib") for text in plain_texts]
-    ngram_ratios = [compression_criterion(text, method="ngram") for text in plain_texts]
-    print(f"L={L} | RLE: mean={sum(rle_ratios)/len(rle_ratios):.4f}")
-    print(f"L={L} | ZLIB: mean={sum(zlib_ratios)/len(zlib_ratios):.4f}")
-    print(f"L={L} | NGRAM: mean={sum(ngram_ratios)/len(ngram_ratios):.4f}")
+    ratios = {method: [func(text) for text in plain_texts] for method, func in compression_methods.items()}
+    print(f"L={L} | {method.upper()}: mean={sum(ratios[method])/len(ratios[method]):.4f}")
 
 # %%
 
