@@ -7,7 +7,7 @@ from pathlib import Path
 
 random.seed(42)
 
-UA_ALPHABET = list("абвгдеєжзиіїйклмнопрстуфхцчшщьюя")
+UA_ALPHABET = list("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
 BIGRAM_ALPHABET = [f"{a}{b}" for a,b in itertools.product(UA_ALPHABET, UA_ALPHABET)]
 
 def normalize(text: str) -> str:
@@ -15,18 +15,26 @@ def normalize(text: str) -> str:
     normalized = []
     for ch in text.lower():
         if ch in allowed:
-            normalized.append(ch)
-        elif ch == 'ґ':
-            normalized.append('г')
+            if not ch == 'ґ':
+                normalized.append(ch)
+            else:
+                normalized.append('г')
         
-    return ''.join(ch for ch in text.lower() if ch in allowed)
+    return ''.join(normalized)
 
 corpus_path = Path("fiction.txt")
 big_ua_text = corpus_path.read_text(encoding="utf-8")
 corpus_clean = normalize(big_ua_text)
 print("Corpus length:", len(corpus_clean))
 
+
+def freq_ref_from_corpus(corpus_clean,l):
+    total = max(1, len(corpus_clean) - l + 1)
+    cnt = Counter(''.join(ng) for ng in ngrams(corpus_clean, l))
+    return {g: c/total for g,c in cnt.items()}
+
 FREQ_REF = {1: freq_ref_from_corpus(corpus_clean, 1), 2: freq_ref_from_corpus(corpus_clean, 2)}
+
 
 
 # %%
@@ -52,12 +60,14 @@ def affine_cipher(text, alphabet, l=1, k=None):
     if l==1:
         return ''.join(alphabet[(a*idx[ch]+b)%M] for ch in text)
     t = text
-    if len(t)%2: t+=alphabet[0]
-    out=[]
+    if len(t) % 2: 
+        t+=alphabet[0]
+    out = []
     for i in range(0,len(t),2):
-        X=idx[t[i]]*m+idx[t[i+1]]
-        Y=(a*X+b)%M
-        out.append(alphabet[Y//m]); out.append(alphabet[Y%m])
+        X = idx[t[i]] * m + idx[t[i+1]]
+        Y = (a*X+b) % M
+        out.append(alphabet[Y//m]) 
+        out.append(alphabet[Y%m])
     return ''.join(out)
 
 def vigenere_cipher(text,key,alphabet):
@@ -82,13 +92,13 @@ def ring_abc(alphabet,n=10):
 
 # %%
 
-random_string=lambda k: ''.join(random.choices(UA_ALPHABET,k=k))
+random_string=lambda k: ''.join(random.choices(UA_ALPHABET, k=k))
 DISTORTION_METHODS={
-    "Vigenere K1":lambda t:vigenere_cipher(t,random_string(1),UA_ALPHABET),
-    "Vigenere K5":lambda t:vigenere_cipher(t,random_string(5),UA_ALPHABET),
-    "Vigenere K10":lambda t:vigenere_cipher(t,random_string(10),UA_ALPHABET),
-    "Affine uni":lambda t:affine_cipher(t,UA_ALPHABET),
-    "Affine bigram":lambda t:affine_cipher(t,UA_ALPHABET,l=2),
+    "Vigenere K1":lambda t:vigenere_cipher(t,random_string(1), UA_ALPHABET),
+    "Vigenere K5":lambda t:vigenere_cipher(t,random_string(5), UA_ALPHABET),
+    "Vigenere K10":lambda t:vigenere_cipher(t,random_string(10), UA_ALPHABET),
+    "Affine uni":lambda t:affine_cipher(t, UA_ALPHABET),
+    "Affine bigram":lambda t:affine_cipher(t, UA_ALPHABET, l=2),
 }
 RANDOM_METHODS={
     "Random uni":lambda l: ''.join(random.choices(UA_ALPHABET,k=l)),
@@ -113,19 +123,22 @@ def generate_dataset(corpus_text,L_values,N_counts):
             data[L][name]=pairs
     return data
 
-def generate_random(L_values,N_counts):
+def generate_random(L_values, N_counts):
     data={}
     for L in L_values:
-        N=N_counts[L]
-        data[L]={}
+        N = N_counts[L]
+        data[L] = {}
         for name,func in RANDOM_METHODS.items():
             data[L][name]=[func(L) for _ in range(N)]
     return data
 
-L_values=[10,100,1000,10000]
-N_counts={10:10000,100:10000,1000:10000,10000:1000}
-distorted_texts=generate_dataset(corpus_clean,L_values,N_counts)
-random_texts=generate_random(L_values,N_counts)
+L_values=[10, 100, 1000, 10000]
+N_counts={10:10000, 
+          100:10000,
+          1000:10000,
+          10000:1000}
+distorted_texts = generate_dataset(corpus_clean, L_values, N_counts)
+random_texts = generate_random(L_values, N_counts)
 print("Datasets built.")
 
 
@@ -144,11 +157,6 @@ def counts_once(text, l):
 
 
 # %%
-
-def freq_ref_from_corpus(corpus_clean,l):
-    total = max(1, len(corpus_clean) - l + 1)
-    cnt = Counter(''.join(ng) for ng in ngrams(corpus_clean, l))
-    return {g: c/total for g,c in cnt.items()}
 
 def build_sets(freq_ref, h, mode="rare"):
     if mode=="rare":
@@ -176,8 +184,7 @@ def c_1_0(cnt, Aprh):
     return any(ng in cnt for ng in Aprh)  # False = H0
 
 def c_1_1(cnt, Aprh, k):
-    occurrences = sum(cnt.get(ng, 0) for ng in Aprh)
-    return occurrences >= k
+    return len(set(cnt.keys()) & Aprh) >= k
 
 def c_1_2(cnt, N, Aprh, freq_ref):
     if N == 0: return True
@@ -195,6 +202,26 @@ def c_3_0(H_obs, H_lang, k_H):
 def c_5_1(cnt, N, top_list, k_empt):
     fempt = sum(1 for ng in top_list if cnt.get(ng, 0) == 0)
     return fempt >= k_empt
+
+def count_empty_bins(cnt, top_list):
+    return sum(1 for ng in top_list if cnt.get(ng, 0) == 0)
+
+def eval_bins(N):
+    bins = build_sets(FREQ_REF[1], N, "top")
+    for method, texts in distorted_texts[1000].items():
+        
+        print("Method:", method)
+        empty_x_total = 0
+        empty_y_total = 0
+        for text in texts:
+            cntX, NX, HX = counts_once(text[0], 1)
+            cntY, NY, HY = counts_once(text[1], 1)
+            empty_x_total += count_empty_bins(cntX, bins)
+            empty_y_total += count_empty_bins(cntY, bins)
+        print(f" Average empty bins X: {empty_x_total/len(texts):.2f}")
+        print(f" Average empty bins Y: {empty_y_total/len(texts):.2f}")
+              
+eval_bins(32)
 
 
 # %%
@@ -223,40 +250,51 @@ def evaluate_boolean_predictions(y_true_pairs, y_pred_pairs):
     beta = FN / n_H1 if n_H1 else 0.0
     return {'alpha': alpha, 'beta': beta}
 
-def eval_distorted(distorted_texts, refs):
+def eval_distorted(distorted_texts, refs, order=ORDER, limit=0):
     for L in sorted(distorted_texts.keys()):
         for l in (1,2):
             fr      = refs[l]["freq_ref"]
             Aprh1_0   = refs[l]["Aprh1_0"]
             Aprh1_1  = refs[l]["Aprh1_1"]
+            Aprh1_2  = refs[l]["Aprh1_2"]
+            Aprh1_3  = refs[l]["Aprh1_3"]
             Top50   = refs[l]["Top50"]
             H_lang  = refs[l]["H_lang"]
             k_11 = refs[l]["k_11"]
             k_empt = refs[l]['k_empt']
             k_H = refs[l]['k_H']
-
             for name, pairs in distorted_texts[L].items():
                 y_true = []
-                preds = {c: [] for c in ORDER}
+                preds = {c: [] for c in order}
                 HH = []
+                limit_counter = 0
                 for (x, y) in pairs:
+                    if limit and limit_counter >= limit:
+                        break
+                    limit_counter += 1
                     cntX, NX, HX = counts_once(x, l)
                     cntY, NY, HY = counts_once(y, l)
                     y_true.append([False, True])
-                    preds['1.0'].append([c_1_0(cntX, Aprh1_0), c_1_0(cntY, Aprh1_0)])
-                    preds['1.1'].append([c_1_1(cntX, Aprh1_1, k_11), c_1_1(cntY, Aprh1_1, k_11)])
-                    preds['1.2'].append([c_1_2(cntX, NX, Aprh1_1, fr), c_1_2(cntY, NY, Aprh1_1, fr)])
-                    preds['1.3'].append([c_1_3(cntX, NX, Aprh1_1, fr), c_1_3(cntY, NY, Aprh1_1, fr)])
-                    preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY, H_lang, k_H)])
-                    preds['5.1'].append([c_5_1(cntX, NX, Top50, k_empt), c_5_1(cntY, NY, Top50, k_empt)])
+                    if '1.0' in order:
+                        preds['1.0'].append([c_1_0(cntX, Aprh1_0), c_1_0(cntY, Aprh1_0)])
+                    if '1.1' in order:
+                        preds['1.1'].append([c_1_1(cntX, Aprh1_1, k_11), c_1_1(cntY, Aprh1_1, k_11)])
+                    if '1.2' in order:
+                        preds['1.2'].append([c_1_2(cntX, NX, Aprh1_2, fr), c_1_2(cntY, NY, Aprh1_2, fr)])
+                    if '1.3' in order:
+                        preds['1.3'].append([c_1_3(cntX, NX, Aprh1_3, fr), c_1_3(cntY, NY, Aprh1_3, fr)])
+                    if '3.0' in order:
+                        preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY, H_lang, k_H)])
+                    if '5.1' in order:
+                        preds['5.1'].append([c_5_1(cntX, NX, Top50, k_empt), c_5_1(cntY, NY, Top50, k_empt)])
                     HH.append((HX, HY))
                 print(f"Distorted | L={L} | l={l} | {name}")
-                for c in ORDER:
+                for c in order:
                     m = evaluate_boolean_predictions(y_true, preds[c])
                     print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
-
-                print(f"Average entropy differences for X: {sum(abs(hx - H_lang) for hx, hy in HH)/len(HH):.4f}")
-                print(f"Average entropy differences for Y: {sum(abs(hy - H_lang) for hx, hy in HH)/len(HH):.4f}")
+                if '3.0' in order:
+                    print(f"Average entropy differences for X: {sum(abs(hx - H_lang) for hx, hy in HH)/len(HH):.4f}")
+                    print(f"Average entropy differences for Y: {sum(abs(hy - H_lang) for hx, hy in HH)/len(HH):.4f}")
     return preds
 
 
@@ -268,30 +306,29 @@ def eval_random(random_texts, refs):
             Aprh1_1  = refs[l]["Aprh1_1"]
             Top50   = refs[l]["Top50"]
             H_lang  = refs[l]["H_lang"]
-            k_H = refs[l]["k_H"]
+            k_11 = refs[l]["k_11"]
+            k_empt = refs[l]['k_empt']
+            k_H = refs[l]['k_H']
             for name, samples in random_texts[L].items():
-                originals=[corpus_slice(corpus_clean, L) for _ in range(len(samples))]
-                y_true=[]
-                preds={c: [] for c in ORDER}
+                y_true = []
+                preds = {c: [] for c in ORDER}
                 HH = []
-                for x,y in zip(originals, samples):
-                    cntX, NX, HX = counts_once(x, l)
-                    cntY, NY, HY = counts_once(y, l)
-                    y_true.append([False, True])
-                    preds['1.0'].append([c_1_0(cntX,NX,Aprh1_0), c_1_0(cntY,NY,Aprh1_0)])
-                    preds['1.1'].append([c_1_1(cntX,Aprh1_1,3), c_1_1(cntY,Aprh1_1,3)])
-                    preds['1.2'].append([c_1_2(cntX,NX,Aprh1_1,fr), c_1_2(cntY,NY,Aprh1_1,fr)])
-                    preds['1.3'].append([c_1_3(cntX,NX,Aprh1_1,fr), c_1_3(cntY,NY,Aprh1_1,fr)])
-                    preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY,H_lang, k_H)])
-                    preds['5.1'].append([c_5_1(cntX,NX,Top50,5), c_5_1(cntY,NY,Top50,5)])
-                    HH.append((HX, HY))
+                for rnd in samples:
+                    cntR, NR, HR = counts_once(rnd, l)
+                    y_true.append([True])
+                    preds['1.0'].append([c_1_0(cntR, Aprh1_0)])
+                    preds['1.1'].append([c_1_1(cntR, Aprh1_1, k_11)])
+                    preds['1.2'].append([c_1_2(cntR, NR, Aprh1_1, fr)])
+                    preds['1.3'].append([c_1_3(cntR, NR, Aprh1_1, fr)])
+                    preds['3.0'].append([c_3_0(HR, H_lang, k_H)])
+                    preds['5.1'].append([c_5_1(cntR, NR, Top50, k_empt)])
+                    HH.append(HR)
                 print(f"Random | L={L} | l={l} | {name}")
                 for c in ORDER:
                     m = evaluate_boolean_predictions(y_true, preds[c])
-                    print(f"  {c}: α={m['alpha']:.3f} β={m['beta']:.3f}")
-                print(f"Average entropy differences for X: {sum(abs(hx - H_lang) for hx, hy in HH)/len(HH):.4f}")
-                print(f"Average entropy differences for Y: {sum(abs(hy - H_lang) for hx, hy in HH)/len(HH):.4f}")
-
+                    print(f"  {c}: β={m['beta']:.3f}")
+                avg_entropy_diff = sum(abs(hr - H_lang) for hr in HH)/len(HH) if HH else 0.0
+                print(f"Average entropy difference: {avg_entropy_diff:.4f}")
 
 
 # %%
@@ -305,8 +342,10 @@ refs_10 = {
     1: {
         "freq_ref": FREQ_REF[1],
         "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
-        "k_11": 3,
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 18, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 4, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 4, "rare")),
+        "k_11": 4,
         "Top50": build_sets(FREQ_REF[1], 10, "top"),
         "k_empt": 7,
         "H_lang": counts_once(corpus_clean, l)[2],
@@ -316,8 +355,10 @@ refs_10 = {
     2: {
         "freq_ref": FREQ_REF[2],
         "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 384, "rare")),  
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 256, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 256, "rare")),
+        "k_11": 3,
         "Top50": build_sets(FREQ_REF[2], 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
         "k_H": 2.669,
@@ -325,6 +366,9 @@ refs_10 = {
     }
 }
 d = eval_distorted(dist_10, refs_10)
+
+
+# %%
 
 
 # %%
@@ -352,7 +396,7 @@ refs_10 = {
         "k_empt": 99,
     }
 }
-d = eval_distorted(dist_10, refs_10)
+d = eval_distorted(dist_10, refs_10, order=['5.1'])
 
 
 # %%
@@ -380,14 +424,16 @@ refs_10 = {
         "k_empt": 148,
     }
 }
-d = eval_distorted(dist_10, refs_10)
+d = eval_distorted(dist_10, refs_10, order=['5.1'])
 
 # %%
 refs_100 = {
     1: {
         "freq_ref": FREQ_REF[1],
         "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 4, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 2, "rare")),
         "k_11": 3,
         "Top50": build_sets(FREQ_REF[1], 10, "top"),
         "k_empt": 1,
@@ -397,23 +443,27 @@ refs_100 = {
     },
     2: {
         "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 160, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 360, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 200, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 200, "rare")),
+        "k_11": 15,
         "Top50": build_sets(FREQ_REF[2], 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
         "k_H": 1.069,
         "k_empt": 30,
     }
 }
-d = eval_distorted(dist_100, refs_100)
+d = eval_distorted(dist_100, refs_100, order=['1.0', '1.1', '1.2', '1.3'])
 
 # %%
 refs_100 = {
     1: {
         "freq_ref": FREQ_REF[1],
         "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 4, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 2, "rare")),
         "k_11": 3,
         "Top50": build_sets(FREQ_REF[1], 10, "top"),
         "k_empt": 1,
@@ -423,51 +473,135 @@ refs_100 = {
     },
     2: {
         "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
-        "Top50": build_sets(FREQ_REF[2], 100, "top"),
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 160, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 360, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 200, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 200, "rare")),
+        "k_11": 15,
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
         "k_H": 1.069,
-        "k_empt": 70,
+        "k_empt": 30,
     }
 }
-d = eval_distorted(dist_100, refs_100)
+d = eval_distorted(dist_100, refs_100, order=['3.0'])
 
+# %%
+refs_100[1]["Top50"] = build_sets(FREQ_REF[1], 15, "top")
+refs_100[1]["k_empt"] = 1
+refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
+refs_100[2]["k_empt"] = 30
+d = eval_distorted(dist_100, refs_100, order=['5.1'])
 
 
 # %%
-refs_100 = {
-    1: {
-        "freq_ref": FREQ_REF[1],
-        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
-        "k_11": 3,
-        "Top50": build_sets(FREQ_REF[1], 10, "top"),
-        "k_empt": 1,
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 0.4,
-        
-    },
-    2: {
-        "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
-        "Top50": build_sets(FREQ_REF[2], 150, "top"),
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 1.069,
-        "k_empt": 111,
-    }
-}
-d = eval_distorted(dist_100, refs_100)
+refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
+refs_100[2]["k_empt"] = 80
+d = eval_distorted(dist_100, refs_100, order=['5.1'])
+
+# %%
+refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
+refs_100[2]["k_empt"] = 125
+d = eval_distorted(dist_100, refs_100, order=['5.1'])
+
+# %%
+
+
+# %%
+
+
+# %%
+
 
 # %%
 refs_1000 = {
     1: {
         "freq_ref": FREQ_REF[1],
         "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 15, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 10, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 64, "rare")),  
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 10, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 10, "rare")),
+        "k_11": 8,
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.25,
+        "k_empt": 70,
+    }
+}
+
+
+d = eval_distorted(dist_1000, refs_1000, order=['1.0', '1.1', '1.2', '1.3'])
+
+# %%
+refs_1000 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[1], 3, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 1, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "k_11": 3,
+        "Top50": build_sets(FREQ_REF[1], 10, "top"),
+        "k_empt": 1,
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.4,
+    },
+    2: {
+        "freq_ref": FREQ_REF[2],
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 128, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 128, "rare")),
+        "k_11": 2,
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
+        "H_lang": counts_once(corpus_clean, l)[2],
+        "k_H": 0.25,
+        "k_empt": 70,
+    }
+}
+
+d = eval_distorted(dist_1000, refs_1000, order=['3.0'])
+
+# %%
+refs_1000[1]["Top50"] = build_sets(FREQ_REF[1], 32, "top")
+refs_1000[1]["k_empt"] = 1
+refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
+refs_1000[2]["k_empt"] = 12
+d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+
+# %%
+
+refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
+refs_1000[2]["k_empt"] = 20
+d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+
+# %%
+
+refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
+refs_1000[2]["k_empt"] = 24
+d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+
+# %%
+dist_10000 = {10000: distorted_texts[10000]}
+refs_10000 = {
+    1: {
+        "freq_ref": FREQ_REF[1],
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
         "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
+        "Aprh1_2": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[1], 2, "rare")),
         "k_11": 9,
         "Top50": build_sets(FREQ_REF[1], 10, "top"),
         "k_empt": 1,
@@ -477,16 +611,68 @@ refs_1000 = {
     },
     2: {
         "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 192, "rare")),
+        "Aprh1_0": set(build_sets(FREQ_REF[2], 512, "rare")),
         "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
+        "Aprh1_2": set(build_sets(FREQ_REF[2], 128, "rare")),
+        "Aprh1_3": set(build_sets(FREQ_REF[2], 128, "rare")),
         "k_11": 2,
-        "Top50": build_sets(FREQ_REF[2], 100, "top"),
+        "Top50": build_sets(FREQ_REF[2], 50, "top"),
         "H_lang": counts_once(corpus_clean, l)[2],
         "k_H": 0.3,
         "k_empt": 70,
     }
 }
-d = eval_distorted(dist_1000, refs_1000)
+
+
+# %%
+refs_10000[1]["Aprh1_0"] = set(build_sets(FREQ_REF[1], 1, "rare"))
+refs_10000[2]["Aprh1_0"] = set(build_sets(FREQ_REF[2], 5, "rare"))
+d = eval_distorted(dist_10000, refs_10000, order=['1.0'])
+
+# %%
+refs_10000[1]["Aprh1_1"] = set(build_sets(FREQ_REF[1], 3, "rare"))
+refs_10000[1]["k_11"] = 3
+refs_10000[2]["Aprh1_1"] = set(build_sets(FREQ_REF[2], 25, "rare"))
+refs_10000[2]["k_11"] = 10
+d = eval_distorted(dist_10000, refs_10000, order=['1.1'])
+
+# %%
+refs_10000[1]["Aprh1_2"] = set(build_sets(FREQ_REF[1], 1, "rare"))
+refs_10000[2]["Aprh1_2"] = set(build_sets(FREQ_REF[2], 5, "rare"))
+d = eval_distorted(dist_10000, refs_10000, order=['1.2'])
+
+# %%
+refs_10000[1]["Aprh1_3"] = set(build_sets(FREQ_REF[1], 1, "rare"))
+refs_10000[2]["Aprh1_3"] = set(build_sets(FREQ_REF[2], 4, "rare"))
+d = eval_distorted(dist_10000, refs_10000, order=['1.3'])
+
+# %%
+refs_10000[1]["k_H"] = 0.35
+refs_10000[2]["k_H"] = 0.42
+
+d = eval_distorted(dist_10000, refs_10000, order=['3.0'])
+
+# %%
+refs_10000[1]["Top50"] = build_sets(FREQ_REF[1], 32, "top")
+refs_10000[1]["k_empt"] = 1
+refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
+refs_10000[2]["k_empt"] = 1
+d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+
+# %%
+
+refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
+refs_10000[2]["k_empt"] = 2
+d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+
+# %%
+
+refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
+refs_10000[2]["k_empt"] = 3
+d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+
+# %%
+
 
 # %%
 
