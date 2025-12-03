@@ -94,51 +94,42 @@ def ring_abc(alphabet,n=10):
 
 random_string=lambda k: ''.join(random.choices(UA_ALPHABET, k=k))
 DISTORTION_METHODS={
-    "Vigenere K1":lambda t:vigenere_cipher(t,random_string(1), UA_ALPHABET),
-    "Vigenere K5":lambda t:vigenere_cipher(t,random_string(5), UA_ALPHABET),
-    "Vigenere K10":lambda t:vigenere_cipher(t,random_string(10), UA_ALPHABET),
-    "Affine uni":lambda t:affine_cipher(t, UA_ALPHABET),
-    "Affine bigram":lambda t:affine_cipher(t, UA_ALPHABET, l=2),
+    "Vigenere K1": lambda t, l:vigenere_cipher(t,random_string(1), UA_ALPHABET),
+    "Vigenere K5": lambda t, l:vigenere_cipher(t,random_string(5), UA_ALPHABET),
+    "Vigenere K10": lambda t, l:vigenere_cipher(t,random_string(10), UA_ALPHABET),
+    "Affine uni": lambda t, l:affine_cipher(t, UA_ALPHABET),
+    "Affine bigram": lambda t, l:affine_cipher(t, UA_ALPHABET, l=2),
 }
 RANDOM_METHODS={
-    "Random uni":lambda l: ''.join(random.choices(UA_ALPHABET,k=l)),
-    "Random bigram":lambda l: ''.join(random.choices(BIGRAM_ALPHABET,k=(l+1)//2))[:l],
-    "Ring uni":lambda l: ring_abc(UA_ALPHABET,l),
-    "Ring bigram":lambda l: ring_abc(BIGRAM_ALPHABET,l)[:l],
+    "Random uni":lambda t, l: ''.join(random.choices(UA_ALPHABET,k=l)),
+    "Random bigram":lambda t, l: ''.join(random.choices(BIGRAM_ALPHABET,k=(l+1)//2)[:l]),
+    "Ring uni":lambda t, l: ring_abc(UA_ALPHABET, l),
+    "Ring bigram":lambda t, l: ring_abc(BIGRAM_ALPHABET, l)[:l],
 }
 
-def generate_dataset(corpus_text,L_values,N_counts):
+def generate_dataset(corpus_text, L_values, N_counts, distortion_methods):
     data={}
     for L in L_values:
         N=N_counts[L]
         texts=[corpus_slice(corpus_text,L) for _ in range(N)]
         data[L]={}
-        for name,func in DISTORTION_METHODS.items():
+        for name,func in distortion_methods.items():
             pairs=[]
             for t in texts:
-                y=func(t)
-                if len(y)>L: y=y[:L]
-                elif len(y)<L: y+=UA_ALPHABET[0]*(L-len(y))
+                y=func(t, L)
                 pairs.append((t,y))
             data[L][name]=pairs
     return data
 
-def generate_random(L_values, N_counts):
-    data={}
-    for L in L_values:
-        N = N_counts[L]
-        data[L] = {}
-        for name,func in RANDOM_METHODS.items():
-            data[L][name]=[func(L) for _ in range(N)]
-    return data
+
 
 L_values=[10, 100, 1000, 10000]
 N_counts={10:10000, 
           100:10000,
           1000:10000,
           10000:1000}
-distorted_texts = generate_dataset(corpus_clean, L_values, N_counts)
-random_texts = generate_random(L_values, N_counts)
+distorted_texts = generate_dataset(corpus_clean, L_values, N_counts, DISTORTION_METHODS)
+random_texts = generate_dataset(corpus_clean, L_values, N_counts, RANDOM_METHODS)
 print("Datasets built.")
 
 
@@ -287,6 +278,9 @@ def eval_distorted(distorted_texts, refs, order=ORDER, limit=0):
                         preds['3.0'].append([c_3_0(HX, H_lang, k_H), c_3_0(HY, H_lang, k_H)])
                     if '5.1' in order:
                         preds['5.1'].append([c_5_1(cntX, NX, Top50, k_empt), c_5_1(cntY, NY, Top50, k_empt)])
+                    if '6.0' in order:
+                        preds['6.0'].append([criterion_6(x, refs[l]['comp_threshold'], refs[l]['comp_method']), 
+                                             criterion_6(y, refs[l]['comp_threshold'], refs[l]['comp_method'])])
                     HH.append((HX, HY))
                 print(f"Distorted | L={L} | l={l} | {name}")
                 for c in order:
@@ -298,50 +292,19 @@ def eval_distorted(distorted_texts, refs, order=ORDER, limit=0):
     return preds
 
 
-def eval_random(random_texts, refs):
-    for L in sorted(random_texts.keys()):
-        for l in (1,2):
-            fr      = refs[l]["freq_ref"]
-            Aprh1_0   = refs[l]["Aprh1_0"]
-            Aprh1_1  = refs[l]["Aprh1_1"]
-            Top50   = refs[l]["Top50"]
-            H_lang  = refs[l]["H_lang"]
-            k_11 = refs[l]["k_11"]
-            k_empt = refs[l]['k_empt']
-            k_H = refs[l]['k_H']
-            for name, samples in random_texts[L].items():
-                y_true = []
-                preds = {c: [] for c in ORDER}
-                HH = []
-                for rnd in samples:
-                    cntR, NR, HR = counts_once(rnd, l)
-                    y_true.append([True])
-                    preds['1.0'].append([c_1_0(cntR, Aprh1_0)])
-                    preds['1.1'].append([c_1_1(cntR, Aprh1_1, k_11)])
-                    preds['1.2'].append([c_1_2(cntR, NR, Aprh1_1, fr)])
-                    preds['1.3'].append([c_1_3(cntR, NR, Aprh1_1, fr)])
-                    preds['3.0'].append([c_3_0(HR, H_lang, k_H)])
-                    preds['5.1'].append([c_5_1(cntR, NR, Top50, k_empt)])
-                    HH.append(HR)
-                print(f"Random | L={L} | l={l} | {name}")
-                for c in ORDER:
-                    m = evaluate_boolean_predictions(y_true, preds[c])
-                    print(f"  {c}: β={m['beta']:.3f}")
-                avg_entropy_diff = sum(abs(hr - H_lang) for hr in HH)/len(HH) if HH else 0.0
-                print(f"Average entropy difference: {avg_entropy_diff:.4f}")
-
-
 # %%
 dist_10 = {10: distorted_texts[10]}
 dist_100 = {100: distorted_texts[100]}
 dist_1000 = {1000: distorted_texts[1000]}
 dist_10000 = {10000: distorted_texts[10000]}
 
+rand_10 = {10: random_texts[10]}
+
 
 refs_10 = {
     1: {
         "freq_ref": FREQ_REF[1],
-        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
+        "Aprh1_0": set(build_sets(FREQ_REF[1], 4, "rare")),
         "Aprh1_1": set(build_sets(FREQ_REF[1], 18, "rare")),
         "Aprh1_2": set(build_sets(FREQ_REF[1], 4, "rare")),
         "Aprh1_3": set(build_sets(FREQ_REF[1], 4, "rare")),
@@ -365,66 +328,37 @@ refs_10 = {
         "k_empt": 49,
     }
 }
-d = eval_distorted(dist_10, refs_10)
 
-
-# %%
-
+d = eval_distorted(dist_10, refs_10, order=['1.0'])
 
 # %%
+d = eval_distorted(rand_10, refs_10, order=['1.0'])
 
-refs_10 = {
-    1: {
-        "freq_ref": FREQ_REF[1],
-        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
-        "k_11": 3,
-        "Top50": build_sets(FREQ_REF[1], 10, "top"),
-        "k_empt": 7,
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 1.31,
-        
-    },
-    2: {
-        "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
-        "Top50": build_sets(FREQ_REF[2], 100, "top"),
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 2.669,
-        "k_empt": 99,
-    }
-}
+# %%
+d = eval_distorted(dist_10, refs_10, order=['1.1', '1.2', '1.3'])
+
+# %%
+d = eval_distorted(rand_10, refs_10, order=['1.1', '1.2', '1.3'])
+
+# %%
+d = eval_distorted(dist_10, refs_10, order=['3.0'])
+
+# %%
+d = eval_distorted(rand_10, refs_10, order=['3.0'])
+
+# %%
 d = eval_distorted(dist_10, refs_10, order=['5.1'])
+d = eval_distorted(rand_10, refs_10, order=['5.1'])
+
+# %%
 
 
 # %%
 
-refs_10 = {
-    1: {
-        "freq_ref": FREQ_REF[1],
-        "Aprh1_0": set(build_sets(FREQ_REF[1], 2, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 10, "rare")),
-        "k_11": 3,
-        "Top50": build_sets(FREQ_REF[1], 10, "top"),
-        "k_empt": 7,
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 1.31,
-        
-    },
-    2: {
-        "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 256, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 256, "rare")),  
-        "k_11": 2,
-        "Top50": build_sets(FREQ_REF[2], 150, "top"),
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 2.669,
-        "k_empt": 148,
-    }
-}
-d = eval_distorted(dist_10, refs_10, order=['5.1'])
+
+# %%
+
+
 
 # %%
 refs_100 = {
@@ -457,34 +391,16 @@ refs_100 = {
 d = eval_distorted(dist_100, refs_100, order=['1.0', '1.1', '1.2', '1.3'])
 
 # %%
-refs_100 = {
-    1: {
-        "freq_ref": FREQ_REF[1],
-        "Aprh1_0": set(build_sets(FREQ_REF[1], 1, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[1], 4, "rare")),
-        "Aprh1_2": set(build_sets(FREQ_REF[1], 2, "rare")),
-        "Aprh1_3": set(build_sets(FREQ_REF[1], 2, "rare")),
-        "k_11": 3,
-        "Top50": build_sets(FREQ_REF[1], 10, "top"),
-        "k_empt": 1,
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 0.4,
-        
-    },
-    2: {
-        "freq_ref": FREQ_REF[2],
-        "Aprh1_0": set(build_sets(FREQ_REF[2], 160, "rare")),
-        "Aprh1_1": set(build_sets(FREQ_REF[2], 360, "rare")),
-        "Aprh1_2": set(build_sets(FREQ_REF[2], 200, "rare")),
-        "Aprh1_3": set(build_sets(FREQ_REF[2], 200, "rare")),
-        "k_11": 15,
-        "Top50": build_sets(FREQ_REF[2], 50, "top"),
-        "H_lang": counts_once(corpus_clean, l)[2],
-        "k_H": 1.069,
-        "k_empt": 30,
-    }
-}
+rand_100 = {100: random_texts[100]}
+d = eval_distorted(rand_100, refs_100, order=['1.0', '1.1', '1.2', '1.3'])
+
+# %%
+
 d = eval_distorted(dist_100, refs_100, order=['3.0'])
+
+# %%
+
+d = eval_distorted(rand_100, refs_100, order=['3.0'])
 
 # %%
 refs_100[1]["Top50"] = build_sets(FREQ_REF[1], 15, "top")
@@ -492,17 +408,20 @@ refs_100[1]["k_empt"] = 1
 refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
 refs_100[2]["k_empt"] = 30
 d = eval_distorted(dist_100, refs_100, order=['5.1'])
+d = eval_distorted(rand_100, refs_100, order=['5.1'])
 
 
 # %%
 refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
 refs_100[2]["k_empt"] = 80
 d = eval_distorted(dist_100, refs_100, order=['5.1'])
+d = eval_distorted(rand_100, refs_100, order=['5.1'])
 
 # %%
-refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
-refs_100[2]["k_empt"] = 125
+refs_100[2]["Top50"] = build_sets(FREQ_REF[2], 200, "top")
+refs_100[2]["k_empt"] = 180
 d = eval_distorted(dist_100, refs_100, order=['5.1'])
+d = eval_distorted(rand_100, refs_100, order=['5.1'])
 
 # %%
 
@@ -541,8 +460,9 @@ refs_1000 = {
     }
 }
 
-
+rand_1000 = {1000: random_texts[1000]}
 d = eval_distorted(dist_1000, refs_1000, order=['1.0', '1.1', '1.2', '1.3'])
+d = eval_distorted(rand_1000, refs_1000, order=['1.0', '1.1', '1.2', '1.3'])
 
 # %%
 refs_1000 = {
@@ -573,6 +493,7 @@ refs_1000 = {
 }
 
 d = eval_distorted(dist_1000, refs_1000, order=['3.0'])
+d = eval_distorted(rand_1000, refs_1000, order=['3.0'])
 
 # %%
 refs_1000[1]["Top50"] = build_sets(FREQ_REF[1], 32, "top")
@@ -580,18 +501,22 @@ refs_1000[1]["k_empt"] = 1
 refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
 refs_1000[2]["k_empt"] = 12
 d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+d = eval_distorted(rand_1000, refs_1000, order=['5.1'])
 
 # %%
 
 refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
 refs_1000[2]["k_empt"] = 20
 d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+d = eval_distorted(rand_1000, refs_1000, order=['5.1'])
 
 # %%
-
+refs_1000
+rand_1000 = {1000: random_texts[1000]}
 refs_1000[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
 refs_1000[2]["k_empt"] = 24
 d = eval_distorted(dist_1000, refs_1000, order=['5.1'])
+d = eval_distorted(rand_1000, refs_1000, order=['5.1'])
 
 # %%
 dist_10000 = {10000: distorted_texts[10000]}
@@ -622,12 +547,13 @@ refs_10000 = {
         "k_empt": 70,
     }
 }
-
+rand_10000 = {10000: random_texts[10000]}
 
 # %%
 refs_10000[1]["Aprh1_0"] = set(build_sets(FREQ_REF[1], 1, "rare"))
 refs_10000[2]["Aprh1_0"] = set(build_sets(FREQ_REF[2], 5, "rare"))
 d = eval_distorted(dist_10000, refs_10000, order=['1.0'])
+d = eval_distorted(rand_10000, refs_10000, order=['1.0'])
 
 # %%
 refs_10000[1]["Aprh1_1"] = set(build_sets(FREQ_REF[1], 3, "rare"))
@@ -635,22 +561,26 @@ refs_10000[1]["k_11"] = 3
 refs_10000[2]["Aprh1_1"] = set(build_sets(FREQ_REF[2], 25, "rare"))
 refs_10000[2]["k_11"] = 10
 d = eval_distorted(dist_10000, refs_10000, order=['1.1'])
+d = eval_distorted(rand_10000, refs_10000, order=['1.1'])
 
 # %%
 refs_10000[1]["Aprh1_2"] = set(build_sets(FREQ_REF[1], 1, "rare"))
 refs_10000[2]["Aprh1_2"] = set(build_sets(FREQ_REF[2], 5, "rare"))
 d = eval_distorted(dist_10000, refs_10000, order=['1.2'])
+d = eval_distorted(rand_10000, refs_10000, order=['1.2'])
 
 # %%
 refs_10000[1]["Aprh1_3"] = set(build_sets(FREQ_REF[1], 1, "rare"))
 refs_10000[2]["Aprh1_3"] = set(build_sets(FREQ_REF[2], 4, "rare"))
 d = eval_distorted(dist_10000, refs_10000, order=['1.3'])
+d = eval_distorted(rand_10000, refs_10000, order=['1.3'])
 
 # %%
 refs_10000[1]["k_H"] = 0.35
 refs_10000[2]["k_H"] = 0.42
 
 d = eval_distorted(dist_10000, refs_10000, order=['3.0'])
+d = eval_distorted(rand_10000, refs_10000, order=['3.0'])
 
 # %%
 refs_10000[1]["Top50"] = build_sets(FREQ_REF[1], 32, "top")
@@ -658,24 +588,33 @@ refs_10000[1]["k_empt"] = 1
 refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 50, "top")
 refs_10000[2]["k_empt"] = 1
 d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+d = eval_distorted(rand_10000, refs_10000, order=['5.1'])
 
 # %%
 
 refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
 refs_10000[2]["k_empt"] = 2
 d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+d = eval_distorted(rand_10000, refs_10000, order=['5.1'])
 
 # %%
 
 refs_10000[2]["Top50"] = build_sets(FREQ_REF[2], 150, "top")
 refs_10000[2]["k_empt"] = 3
 d = eval_distorted(dist_10000, refs_10000, order=['5.1'])
+d = eval_distorted(rand_10000, refs_10000, order=['5.1'])
 
 # %%
-
+refs_10[2]["Top50"] = build_sets(FREQ_REF[2], 200, "top")
+refs_10[2]["k_empt"] = 198
+d = eval_distorted(dist_10, refs_10, order=['5.1'])
+d = eval_distorted(rand_10, refs_10, order=['5.1'])
 
 # %%
-
+refs_10[2]["Top50"] = build_sets(FREQ_REF[2], 100, "top")
+refs_10[2]["k_empt"] = 98
+d = eval_distorted(dist_10, refs_10, order=['5.1'])
+d = eval_distorted(rand_10, refs_10, order=['5.1'])
 
 # %%
 
@@ -745,102 +684,6 @@ KV  = "ОЬ"     # header key/value sep
 END = "ЯЬ"   # end-of-header
 
 
-def ngram_counts(s: str, n: int) -> Counter:
-    N = len(s) - n + 1
-    if N <= 0: return Counter()
-    return Counter(s[i:i+n] for i in range(N))
-
-def nonoverlap_positions(s: str, pat: str):
-    i, L, P = 0, len(s), len(pat)
-    pos=[]
-    while True:
-        j = s.find(pat, i)
-        if j < 0: break
-        pos.append(j)
-        i = j + P
-    return pos
-
-def apply_nonoverlap(s: str, pat: str, code: str) -> str:
-    i=0; P=len(pat); out=[]
-    while True:
-        j = s.find(pat, i)
-        if j < 0:
-            out.append(s[i:]); break
-        out.append(s[i:j]); out.append(code)
-        i = j + P
-    return "".join(out)
-
-def compress_ngram(s: str, maxN: int = 6, maxCodes: int = 26) -> str:
-    s = norm_ua(s)
-    if not s: return END  
-    mapping = []                 
-    used = set()
-    body = s
-    for _ in range(maxCodes):
-        code = next((c for c in UP if c not in used), None)
-        if not code: break
-        best = (None, 0, None)   
-        for n in range(maxN, 1, -1):
-            cnt = ngram_counts(body, n)
-            for pat, oc in cnt.items():
-                if oc < 2: continue
-                pos = nonoverlap_positions(body, pat)
-                k = len(pos)
-                if k < 2: continue
-                H = len(pat) + len(KV) + 1 + len(SEP)
-                gain = k * (len(pat) - 1) - H
-                if gain > best[1]:
-                    best = (pat, gain, pos)
-        if best[0] is None or best[1] <= 0:
-            break
-        pat, _, _ = best
-        body = apply_nonoverlap(body, pat, code)
-        mapping.append((pat, code))
-        used.add(code)
-    header = "".join(c + KV + p + SEP for p, c in mapping) + END + " "
-    return header + body
-
-def decompress_ngram(blob: str) -> str:
-    pos = blob.find(END)
-    if pos == -1: 
-        return blob
-    hdr = blob[:pos]
-    body = blob[pos+len(END):]
-    if body.startswith(" "): body = body[1:]
-    dec = {}
-    i = 0
-    while i < len(hdr):
-        j = hdr.find(SEP, i)
-        if j == -1: break
-        entry = hdr[i:j]
-        m = entry.find(KV)
-        if m != -1:
-            code = entry[:m]     
-            pat  = entry[m+len(KV):]  
-            if code and pat:
-                dec[code] = pat
-        i = j + len(SEP)
-    out=[]
-    for ch in body:
-        if ch in dec: out.append(dec[ch])
-        else: out.append(ch)
-    return "".join(out)
-
-def ratio_ngram(s: str) -> float:
-    s = normalize(s)
-
-    c = compress_ngram(s)
-    return len(c) / len(s)
-
-
-
-def compression_criterion_ngram(text: str):
-    text = normalize(text)
-    r_text = ratio_ngram(text)
-
-
-    return r_text
-
 
 s = """Ти знаєш, що ти — людина.
 Ти знаєш про це чи ні?
@@ -866,12 +709,7 @@ s = """Ти знаєш, що ти — людина.
 Мука твоя — єдина,
 Очі твої — одні."""
 
-t = normalize(s)  
-comp = compress_ngram(t)
-rest = decompress_ngram(comp)
-print("compressed:", comp[:120] + ("..." if len(comp)>120 else ""))
-print("roundtrip ok:", rest == t)
-print("comp ratio :", compression_criterion_ngram(t))
+t = normalize(s) 
 
 LOW = "абвгдеєжзиіїйклмнопрстуфхцчшщьюя"   
 UP  = "АБВГДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ" 
@@ -901,7 +739,7 @@ def _header(mapping: list[tuple[str, str]]) -> str:
     return "".join(c + KV + p + SEP for p, c in mapping) + END + SPACE_AFTER_HEADER
 
 def compress_bpe_letters(text: str, max_merges: int = 26, min_count: int = 3) -> str:
-    s = norm_ua(text)
+    s = normalize(text)
     if not s:
         return END
     seq = list(s)
@@ -972,7 +810,6 @@ def ratio_bpe(s: str) -> float:
 
 compression_methods = {
     'bpe': ratio_bpe,
-    'ngram': ratio_ngram,
     'rle': ratio_rle,
     'zlib': ratio_zlib,
 }
@@ -985,6 +822,9 @@ def compression_criterion(
     r_text = method(text)
     return r_text
 
+def criterion_6(text: str, threshold: float = 0.9, method: str = 'zlib') -> bool:
+    ratio = compression_criterion(text, compression_methods[method])
+    return ratio > threshold  # True = H1 (not random), False = H0 (random)
 
 
 
@@ -1002,11 +842,25 @@ sample_ua_text = """
 
 # %%
 
+refs_1000[1]['comp_threshold'] = 0.48
+refs_1000[1]['comp_method'] = 'zlib'
+refs_1000[2]['comp_threshold'] = 0.48
+refs_1000[2]['comp_method'] = 'zlib'
+
+
+d = eval_distorted(rand_1000, refs_1000, order=['6.0'], limit=500)
 
 # %%
-L_values=[1000, 10000]
-N_counts={1000:100,10000:10}
-random_texts = generate_random(L_values, N_counts)
+refs_1000[1]['comp_threshold'] = 1.95
+refs_1000[1]['comp_method'] = 'rle'
+
+d = eval_distorted(rand_1000, refs_1000, order=['6.0'], limit=500)
+
+# %%
+refs_1000[1]['comp_threshold'] = 0.99
+refs_1000[1]['comp_method'] = 'bpe'
+
+d = eval_distorted(rand_1000, refs_1000, order=['6.0'], limit=100)
 
 # %%
 compression_results = {}
@@ -1014,7 +868,7 @@ print("Compression ratios on random texts:")
 for L, texts in random_texts.items():
     compression_results[L] = {method: [] for method in compression_methods.keys()}
     for method, samples in texts.items():
-        compression_results[L] = {method: [func(sample) for sample in samples] 
+        compression_results[L] = {method: [func(sample[1]) for sample in samples] 
                                       for method, func in compression_methods.items()}  
     for method, ratios in compression_results[L].items():
         print(f"L={L} | {method.upper()}: mean={sum(ratios)/len(ratios):.4f}")
@@ -1027,12 +881,35 @@ for L in L_values:
     print(f"L={L} | {method.upper()}: mean={sum(ratios[method])/len(ratios[method]):.4f}")
 
 # %%
+compression_results = {}
+print("Compression ratios on random texts:")
 
+for L, texts in rand_10000.items():
+    compression_results[L] = {method: [] for method in compression_methods.keys()}
+    limit_count = 0
+    for method, samples in texts.items():
+
+        for comp_method, func in compression_methods.items():
+            print(f"Processing L={L}, method={method}, comp_method={comp_method}")
+            compression_results[L][comp_method] = [func(sample[1]) for sample in samples[:100]]
+        break
+    for method, ratios in compression_results[L].items():
+        print(f"L={L} | {method.upper()}: mean={sum(ratios)/len(ratios):.4f}")
+   
+    
+print("Compression ratios on plain texts:")
+for L in [10000]:
+    plain_texts = [corpus_slice(corpus_clean, L) for _ in range(N_counts[L])]
+    comp_results = {method: [] for method in compression_methods.keys()}
+    for comp_method, func in compression_methods.items():
+        comp_results[comp_method] = [func(text) for text in plain_texts]
+    for method, ratios in comp_results.items():
+        print(f"L={L} | {method.upper()}: mean={sum(ratios)/len(ratios):.4f}")
 
 
 
 # %%
-1
+
 
 # %%
 
